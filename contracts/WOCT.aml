@@ -79,14 +79,12 @@ contract WOCT {
     return amt
   }
 
-  // [AUDIT-FIX HIGH-6] withdraw: burn first (CEI), then native_transfer OCT
-  // [V2-AUDIT-FIX V2-HIGH-4] Atomicity assumption: on Octra, native_transfer is executed
-  //   atomically within the same transaction.  If native_transfer fails, the AML runtime
-  //   reverts the entire transaction, restoring the caller's WOCT balance and total_supply.
-  //   This prevents the scenario where the burn succeeds but the OCT transfer does not.
-  //   If the Octra runtime semantics change such that native_transfer is NOT atomic with
-  //   the rest of the transaction, a pull-over-push pattern would be needed (i.e., track
-  //   pending withdrawals in a map and let users claim OCT in a separate call).
+  // [V7-CRIT-10] Pull pattern: track pending withdrawals instead of direct transfer
+  // pending_withdrawals[caller] = amount of OCT waiting to be claimed
+  pending_withdrawals: map[address]int
+
+  // [AUDIT-FIX HIGH-6] withdraw: burn WOCT and record pending OCT withdrawal
+  // User must call claim_withdrawal() to receive native OCT (pull pattern)
   fn withdraw(amt: int): bool {
     require(!self.paused, "contract paused")
     require(!self.locked, "reentrancy guard")
@@ -96,21 +94,45 @@ contract WOCT {
 
     self.locked = true
 
-    // [AUDIT-FIX HIGH-6] CEI: Reduce WOCT balance and total_supply BEFORE native_transfer
+    // [AUDIT-FIX HIGH-6] CEI: Reduce WOCT balance and total_supply BEFORE recording withdrawal
     self.balances[caller] = bal - amt
     self.total_supply = self.total_supply - amt
 
-    // [AUDIT-FIX] Emit burn events before the transfer (CEI)
+    // [V7-CRIT-10] Record pending withdrawal instead of direct transfer
+    self.pending_withdrawals[caller] += amt
+
+    // [AUDIT-FIX] Emit burn events (CEI)
     emit Burn(caller, amt)
     emit Transfer(caller, "", amt)
-
-    // [AUDIT-FIX HIGH-6] native_transfer sends native OCT — called last per CEI pattern
-    // [V2-AUDIT-FIX V2-HIGH-4] Atomic with TX revert on failure — see comment above.
-    transfer(caller, amt)
 
     self.locked = false
 
     return true
+  }
+
+  // [V7-CRIT-10] Claim pending OCT withdrawal (pull pattern)
+  fn claim_withdrawal(): bool {
+    require(!self.paused, "contract paused")
+    require(!self.locked, "reentrancy guard")
+    let amount = self.pending_withdrawals[caller]
+    require(amount > 0, "no pending withdrawal")
+
+    self.locked = true
+
+    // Clear pending amount BEFORE transfer (CEI)
+    self.pending_withdrawals[caller] = 0
+
+    // [V7-CRIT-10] Transfer native OCT - if this fails, state already updated
+    transfer(caller, amount)
+
+    self.locked = false
+
+    return true
+  }
+
+  // [V7-CRIT-10] View pending withdrawal amount
+  view fn get_pending_withdrawal(addr: address): int {
+    return self.pending_withdrawals[addr]
   }
 
   // [V2-AUDIT-FIX V2-MED-2] Removed the self-transfer restriction (to != caller).

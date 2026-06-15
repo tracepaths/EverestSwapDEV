@@ -4,8 +4,14 @@ const bs58 = require('bs58');
 const fs = require('fs');
 const path = require('path');
 
-const RPC_URL = 'https://devnet.octrascan.io/rpc';
-const MNEMONIC = 'pumpkin divert spend later token student spot faint collect visual carbon matter';
+// [V7-SECURITY] Load MNEMONIC from environment variable - NEVER hardcode in source!
+const RPC_URL = process.env.RPC_URL || 'https://devnet.octrascan.io/rpc';
+const MNEMONIC = process.env.MNEMONIC;
+if (!MNEMONIC) {
+  console.error('ERROR: MNEMONIC environment variable is not set.');
+  console.error('Please set it with: export MNEMONIC="your mnemonic phrase"');
+  process.exit(1);
+}
 const FEE_OU = '100000';
 const DEPLOYMENTS_PATH = path.join(__dirname, '..', 'deployments.json');
 

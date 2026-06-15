@@ -8,11 +8,16 @@ contract Router {
     // [AUDIT-FIX NEW-35] Slippage tolerance maksimum global (dalam basis points, 10000 = 100%)
     // [V2-HIGH-9 / V2-LOW-7] max_slippage_bps is now actively enforced in swap_exact_tokens_for_tokens.
     max_slippage_bps: int
+    // [V7-CRIT-8] Two-step ownership transfer
+    pending_owner: address
   }
 
   event SwapExact(who: address, token_in: address, token_out: address, amount_in: int, amount_out: int)
   // [AUDIT-FIX NEW-34] Pause event
   event Paused(status: bool)
+  // [V7-CRIT-8] Two-step ownership events
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
 
   constructor() {
     self.factory = origin
@@ -22,6 +27,8 @@ contract Router {
     self.paused = false
     // [AUDIT-FIX NEW-35] Default max slippage: 50% (5000 bps)
     self.max_slippage_bps = 5000
+    // [V7-CRIT-8] Two-step ownership: no pending owner at start
+    self.pending_owner = ""
   }
 
   fn set_factory(addr: address): bool {
@@ -43,8 +50,20 @@ contract Router {
   fn transfer_ownership(new_owner: address): bool {
     require(caller == self.owner, "not authorized")
     assert_address(new_owner)
-    require(new_owner != "", "zero address")
-    self.owner = new_owner
+    require(new_owner != "", "new owner is zero address")
+    // [V7-CRIT-8] Two-step ownership transfer
+    self.pending_owner = new_owner
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    emit OwnershipTransferred(old_owner, self.owner)
     return true
   }
 
@@ -70,7 +89,8 @@ contract Router {
     require(!self.paused, "contract paused")
     require(amount_in > 0, "insufficient input")
     require(token_in != token_out, "same token")
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     assert_address(token_in)
     assert_address(token_out)
     // [AUDIT-FIX NEW-36] Validasi factory sudah dikonfigurasi
@@ -86,8 +106,13 @@ contract Router {
     let pool_addr = call(factory_addr, "get_pool", [token_in, token_out])
     require(pool_addr != "", "no pool found")
 
-    // Tentukan arah swap berdasarkan token_a pool
+    // [V7-CRIT-6] Validasi pool pair match requested tokens
     let pool_token_a = call(pool_addr, "get_token_a", [])
+    let pool_token_b = call(pool_addr, "get_token_b", [])
+    require((pool_token_a == token_in && pool_token_b == token_out) || (pool_token_a == token_out && pool_token_b == token_in), "pool tokens do not match requested pair")
+    require(pool_token_a != pool_token_b, "pool tokens cannot be identical")
+
+    // Tentukan arah swap berdasarkan token_a pool
     let is_a_to_b = (pool_token_a == token_in)
 
     // [V3-AUDIT-FIX] Enforce max_slippage_bps globally using expected output from the pool.
@@ -153,5 +178,10 @@ contract Router {
 
   view fn get_max_slippage_bps(): int {
     return self.max_slippage_bps
+  }
+
+  // [V7-CRIT-8] Two-step ownership views
+  view fn get_pending_owner(): address {
+    return self.pending_owner
   }
 }

@@ -19,7 +19,10 @@ async function rpc(method, params) {
 }
 
 function getDeployerKey() {
-  const MNEMONIC = 'pumpkin divert spend later token student spot faint collect visual carbon matter';
+  const MNEMONIC = process.env.MNEMONIC;
+  if (!MNEMONIC) {
+    throw new Error('MNEMONIC environment variable is not set');
+  }
   const seed64 = crypto.pbkdf2Sync(MNEMONIC, 'mnemonic', 2048, 64, 'sha512');
   const hmac = crypto.createHmac('sha512', 'Octra seed');
   hmac.update(Buffer.from(seed64));

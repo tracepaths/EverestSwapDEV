@@ -83,17 +83,20 @@ contract SwapPool {
   // [V2-AUDIT-FIX V2-CRIT-1] CEI: all state updates happen BEFORE external calls
   // [V2-AUDIT-FIX V2-CRIT-2] Use revert() on min_lp failure so TX rolls back atomically
   fn add_liquidity(amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
-    // [AUDIT-FIX MED-1] Deadline check
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [AUDIT-FIX MED-1] Deadline check - enforce 5-minute max
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
     require(!self.locked, "reentrancy guard")
     require(amount_a > 0 && amount_b > 0, "zero amounts")
     require(self.token_a != "" && self.token_b != "", "tokens not set")
+    // [V7-HIGH-5] Validate lock_duration cannot be negative
+    require(lock_duration >= 0, "lock_duration cannot be negative")
 
     self.locked = true
 
-    call(self.token_a, "pull", [caller, self_addr, amount_a])
-    call(self.token_b, "pull", [caller, self_addr, amount_b])
+    // [V7-CRIT-1] Validate token pull succeeded
+    require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+    require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
 
     let is_first = self.total_lp == 0
 
@@ -191,17 +194,18 @@ contract SwapPool {
 
     // Refund excess tokens AFTER state is fully committed
     if refund_a > 0 {
-      call(self.token_a, "transfer", [caller, refund_a])
+      require(call(self.token_a, "transfer", [caller, refund_a]), "token_a refund failed")
     }
     if refund_b > 0 {
-      call(self.token_b, "transfer", [caller, refund_b])
+      require(call(self.token_b, "transfer", [caller, refund_b]), "token_b refund failed")
     }
 
     return (lp_amount, used_a, used_b)
   }
 
   fn remove_liquidity(position_id: int, min_a: int, min_b: int, deadline: int): (int, int) {
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
     require(!self.locked, "reentrancy guard")
     require(position_id > 0, "invalid position id")
@@ -238,8 +242,9 @@ contract SwapPool {
     self.reserve_a -= amount_a
     self.reserve_b -= amount_b
 
-    call(self.token_a, "transfer", [caller, amount_a])
-    call(self.token_b, "transfer", [caller, amount_b])
+    // [V7-CRIT-1] Validate transfer succeeded
+    require(call(self.token_a, "transfer", [caller, amount_a]), "token_a transfer failed")
+    require(call(self.token_b, "transfer", [caller, amount_b]), "token_b transfer failed")
 
     self.locked = false
     emit RemoveLiquidity(caller, amount_a, amount_b, lp_amount)
@@ -249,7 +254,8 @@ contract SwapPool {
   }
 
   fn close_position(min_a: int, min_b: int, deadline: int): (int, int) {
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
     require(!self.locked, "reentrancy guard")
     require(self.total_lp > 0, "no liquidity")
@@ -300,8 +306,9 @@ contract SwapPool {
     self.reserve_a -= amount_a
     self.reserve_b -= amount_b
 
-    call(self.token_a, "transfer", [caller, amount_a])
-    call(self.token_b, "transfer", [caller, amount_b])
+    // [V7-CRIT-1] Validate transfer succeeded
+    require(call(self.token_a, "transfer", [caller, amount_a]), "token_a transfer failed")
+    require(call(self.token_b, "transfer", [caller, amount_b]), "token_b transfer failed")
 
     self.locked = false
     emit RemoveLiquidity(caller, amount_a, amount_b, lp_bal)
@@ -311,7 +318,8 @@ contract SwapPool {
   }
 
   fn swap_a_for_b(amount_in: int, min_out: int, deadline: int): int {
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
     require(!self.locked, "reentrancy guard")
     require(amount_in > 0, "zero input")
@@ -320,7 +328,8 @@ contract SwapPool {
 
     self.locked = true
 
-    call(self.token_a, "pull", [caller, self_addr, amount_in])
+    // [V7-CRIT-1] Validate pull succeeded
+    require(call(self.token_a, "pull", [caller, self_addr, amount_in]), "token_a pull failed")
 
     let fee_amount = amount_in * self.fee_numerator / self.fee_denominator
     let amount_in_after_fee = amount_in - fee_amount
@@ -342,7 +351,8 @@ contract SwapPool {
     let k_after = self.reserve_a * self.reserve_b
     require(k_after >= k_before, "invariant violation")
 
-    call(self.token_b, "transfer", [caller, out])
+    // [V7-CRIT-1] Validate transfer succeeded
+    require(call(self.token_b, "transfer", [caller, out]), "token_b transfer failed")
 
     self.locked = false
     emit Swap(caller, self.token_a, amount_in, out)
@@ -351,7 +361,8 @@ contract SwapPool {
   }
 
   fn swap_b_for_a(amount_in: int, min_out: int, deadline: int): int {
-    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
     require(!self.locked, "reentrancy guard")
     require(amount_in > 0, "zero input")
@@ -360,7 +371,8 @@ contract SwapPool {
 
     self.locked = true
 
-    call(self.token_b, "pull", [caller, self_addr, amount_in])
+    // [V7-CRIT-1] Validate pull succeeded
+    require(call(self.token_b, "pull", [caller, self_addr, amount_in]), "token_b pull failed")
 
     let fee_amount = amount_in * self.fee_numerator / self.fee_denominator
     let amount_in_after_fee = amount_in - fee_amount
@@ -382,7 +394,8 @@ contract SwapPool {
     let k_after = self.reserve_a * self.reserve_b
     require(k_after >= k_before, "invariant violation")
 
-    call(self.token_a, "transfer", [caller, out])
+    // [V7-CRIT-1] Validate transfer succeeded
+    require(call(self.token_a, "transfer", [caller, out]), "token_a transfer failed")
 
     self.locked = false
     emit Swap(caller, self.token_b, amount_in, out)
@@ -394,6 +407,7 @@ contract SwapPool {
     require(caller == self.owner, "not authorized")
     require(!self.locked, "reentrancy guard")
     self.locked = true
+    // [V7-CRIT-1] Validate balance_of calls succeeded
     let bal_a = call(self.token_a, "balance_of", [self_addr])
     let bal_b = call(self.token_b, "balance_of", [self_addr])
     require(bal_a >= self.reserve_a && bal_b >= self.reserve_b, "sync would reduce reserves")
@@ -421,10 +435,10 @@ contract SwapPool {
     self.fee_reserve_b = 0
 
     if amt_a > 0 {
-      call(self.token_a, "transfer", [recipient, amt_a])
+      require(call(self.token_a, "transfer", [recipient, amt_a]), "token_a fee transfer failed")
     }
     if amt_b > 0 {
-      call(self.token_b, "transfer", [recipient, amt_b])
+      require(call(self.token_b, "transfer", [recipient, amt_b]), "token_b fee transfer failed")
     }
 
     self.locked = false

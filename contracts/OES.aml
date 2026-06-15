@@ -25,6 +25,8 @@ contract OES {
     blacklisted: map[address]bool
     // [V2-AUDIT-FIX V2-MED-1] Configurable cap on rewards_per_epoch
     max_rewards_per_epoch: int
+    // [V7-CRIT-7] Two-step ownership transfer
+    pending_owner: address
   }
 
   event Transfer(from: address, to: address, amount: int)
@@ -36,6 +38,9 @@ contract OES {
   event Paused(status: bool)
   // [AUDIT-FIX NEW-15] Event for blacklist changes
   event Blacklisted(addr: address, status: bool)
+  // [V7-CRIT-7] Two-step ownership events
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
 
   constructor() {
     self.name = "Octra Everest Swap"
@@ -61,6 +66,8 @@ contract OES {
     self.last_reward_epoch = 0
     // [V2-AUDIT-FIX V2-MED-1] Default cap: 10x the initial rewards_per_epoch
     self.max_rewards_per_epoch = 60821917800
+    // [V7-CRIT-7] Two-step ownership: no pending owner at start
+    self.pending_owner = ""
   }
 
   view fn decimals(): int { return self.decimals }
@@ -183,16 +190,19 @@ contract OES {
   fn set_rewards_per_epoch(amount: int): bool {
     require(caller == self.owner, "not authorized")
     require(amount > 0, "rewards must be positive")
-    // [V2-AUDIT-FIX V2-MED-1] Hard cap: amount must not exceed max_rewards_per_epoch
+    // [V7-CRIT-7] Hard cap: amount cannot exceed max_rewards_per_epoch (immutable once set)
     require(amount <= self.max_rewards_per_epoch, "exceeds max rewards per epoch cap")
     self.rewards_per_epoch = amount
     return true
   }
 
   // [V2-AUDIT-FIX V2-MED-1] Owner can raise the cap but not lower it below current rate
+  // [V7-CRIT-7] Cap increase limited to 2x per call to prevent instant massive increase
   fn set_max_rewards_per_epoch(cap: int): bool {
     require(caller == self.owner, "not authorized")
     require(cap >= self.rewards_per_epoch, "cap below current rewards_per_epoch")
+    // [V7-CRIT-7] Prevent extreme cap increases (max 2x current cap per call)
+    require(cap <= self.max_rewards_per_epoch * 2, "cap increase too large")
     self.max_rewards_per_epoch = cap
     return true
   }
@@ -240,7 +250,22 @@ contract OES {
     assert_address(new_owner)
     // [AUDIT-FIX NEW-13] Validate new_owner is not zero
     require(new_owner != "", "new owner is zero address")
-    self.owner = new_owner
+    // [V7-CRIT-7] Two-step ownership transfer
+    require(new_owner != self.rewards_vault, "new owner cannot be rewards vault")
+    self.pending_owner = new_owner
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    // [V7-CRIT-7] Prevent vault from accepting ownership
+    require(self.pending_owner != self.rewards_vault, "rewards vault cannot be owner")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    emit OwnershipTransferred(old_owner, self.owner)
     return true
   }
 
@@ -256,5 +281,10 @@ contract OES {
   // [V2-AUDIT-FIX V2-MED-1] View max rewards cap
   view fn get_max_rewards_per_epoch(): int {
     return self.max_rewards_per_epoch
+  }
+
+  // [V7-CRIT-7] Two-step ownership views
+  view fn get_pending_owner(): address {
+    return self.pending_owner
   }
 }
