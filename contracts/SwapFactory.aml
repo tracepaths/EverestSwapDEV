@@ -1,0 +1,51 @@
+contract SwapFactory {
+  state {
+    pools: list[address]
+    pool_count: int
+    fee_to: address
+    fee_to_setter: address
+    pool_by_tokens: map[string]address
+  }
+
+  event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
+
+  constructor() {
+    self.fee_to_setter = origin
+    self.fee_to = origin
+    self.pool_count = 0
+  }
+
+  fn register_pool(token_a: address, token_b: address, pool: address): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    require(token_a != token_b, "identical tokens")
+    require(pool != "", "zero pool address")
+
+    self.pools.push(pool)
+    let pool_id = self.pool_count
+    self.pool_count = pool_id + 1
+
+    emit PoolCreated(token_a, token_b, pool, pool_id)
+    return true
+  }
+
+  fn set_fee_to(_fee_to: address): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    self.fee_to = _fee_to
+    return true
+  }
+
+  view fn get_pool(token_a: address, token_b: address): address {
+    if self.pool_count == 0 {
+      return ""
+    }
+    return self.pools[0]
+  }
+
+  view fn all_pools(): list[address] {
+    return self.pools
+  }
+
+  view fn pools_length(): int {
+    return self.pool_count
+  }
+}

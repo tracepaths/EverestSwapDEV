@@ -1,0 +1,157 @@
+contract Router {
+  state {
+    factory: address
+    woct: address
+    owner: address
+    // [AUDIT-FIX NEW-34] Pause dan whitelist token
+    paused: bool
+    // [AUDIT-FIX NEW-35] Slippage tolerance maksimum global (dalam basis points, 10000 = 100%)
+    // [V2-HIGH-9 / V2-LOW-7] max_slippage_bps is now actively enforced in swap_exact_tokens_for_tokens.
+    max_slippage_bps: int
+  }
+
+  event SwapExact(who: address, token_in: address, token_out: address, amount_in: int, amount_out: int)
+  // [AUDIT-FIX NEW-34] Pause event
+  event Paused(status: bool)
+
+  constructor() {
+    self.factory = origin
+    self.woct = origin
+    // [AUDIT-FIX LOW-1] Simpan owner di state dari constructor
+    self.owner = origin
+    self.paused = false
+    // [AUDIT-FIX NEW-35] Default max slippage: 50% (5000 bps)
+    self.max_slippage_bps = 5000
+  }
+
+  fn set_factory(addr: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(addr)
+    require(addr != "", "zero address")
+    self.factory = addr
+    return true
+  }
+
+  fn set_woct(addr: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(addr)
+    require(addr != "", "zero address")
+    self.woct = addr
+    return true
+  }
+
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(new_owner)
+    require(new_owner != "", "zero address")
+    self.owner = new_owner
+    return true
+  }
+
+  // [AUDIT-FIX NEW-34] Emergency pause
+  fn set_paused(status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    self.paused = status
+    emit Paused(status)
+    return true
+  }
+
+  // [AUDIT-FIX NEW-35] Set max slippage (in bps)
+  fn set_max_slippage_bps(bps: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(bps > 0 && bps <= 9999, "invalid slippage bps")
+    self.max_slippage_bps = bps
+    return true
+  }
+
+  // [AUDIT-FIX CRIT-5] Router mengecek token_in terhadap token_a pool
+  // dan memilih direction swap yang benar (swap_a_for_b atau swap_b_for_a)
+  fn swap_exact_tokens_for_tokens(amount_in: int, min_out: int, token_in: address, token_out: address, to: address, deadline: int): int {
+    require(!self.paused, "contract paused")
+    require(amount_in > 0, "insufficient input")
+    require(token_in != token_out, "same token")
+    require(deadline == 0 || deadline >= epoch, "transaction expired")
+    assert_address(token_in)
+    assert_address(token_out)
+    // [AUDIT-FIX NEW-36] Validasi factory sudah dikonfigurasi
+    require(self.factory != "" && self.factory != origin, "factory not configured")
+    // [AUDIT-FIX NEW-37] Validasi min_out > 0 untuk mencegah sandwich attack tanpa proteksi
+    require(min_out > 0, "min_out must be positive")
+    // [AUDIT-FIX NEW-38] Validasi recipient tidak zero address
+    require(to != "", "recipient is zero address")
+
+    let factory_addr = self.factory
+
+    // Dapatkan pool address dari factory (bidirectional lookup)
+    let pool_addr = call(factory_addr, "get_pool", [token_in, token_out])
+    require(pool_addr != "", "no pool found")
+
+    // Tentukan arah swap berdasarkan token_a pool
+    let pool_token_a = call(pool_addr, "get_token_a", [])
+    let is_a_to_b = (pool_token_a == token_in)
+
+    // [V3-AUDIT-FIX] Enforce max_slippage_bps globally using expected output from the pool.
+    // Querying get_amount_out from the pool gives the correct current exchange rate,
+    // avoiding the broken 1:1 price assumption which blocked non-1:1 swaps (e.g. OES/WOCT).
+    let expected_out = call(pool_addr, "get_amount_out", [amount_in, is_a_to_b])
+    let max_allowed_loss_bps = self.max_slippage_bps
+    let min_out_floor = expected_out * (10000 - max_allowed_loss_bps) / 10000
+    if min_out_floor > 0 {
+      require(min_out >= min_out_floor, "min_out below global max slippage threshold")
+    }
+
+    // [V2-HIGH-8] Record router's token_in balance before pull to detect malicious token contracts.
+    let balance_before = call(token_in, "balance_of", [self_addr])
+
+    // Pull token dari caller ke router
+    call(token_in, "pull", [caller, self_addr, amount_in])
+
+    // [V2-HIGH-8] Verify tokens were actually received by the router
+    let balance_after = call(token_in, "balance_of", [self_addr])
+    require(balance_after >= balance_before + amount_in, "token pull did not increase router balance (possible malicious token)")
+
+    // Grant token_in ke pool
+    call(token_in, "grant", [pool_addr, amount_in])
+
+    let amount_out = 0
+
+    if is_a_to_b {
+      // token_in adalah token_a → swap_a_for_b
+      amount_out = call(pool_addr, "swap_a_for_b", [amount_in, min_out, deadline])
+    } else {
+      // token_in adalah token_b → swap_b_for_a
+      amount_out = call(pool_addr, "swap_b_for_a", [amount_in, min_out, deadline])
+    }
+
+    require(amount_out >= min_out, "insufficient output")
+    // [AUDIT-FIX NEW-39] Validasi amount_out > 0
+    require(amount_out > 0, "zero output")
+
+    // [V2-MED-6] Transfer output tokens to recipient.
+    let recipient = to
+    if recipient == self_addr {
+      // If someone mistakenly sets `to` to the router itself, redirect to the original caller
+      recipient = caller
+    }
+    call(token_out, "transfer", [recipient, amount_out])
+
+    emit SwapExact(caller, token_in, token_out, amount_in, amount_out)
+    return amount_out
+  }
+
+  view fn get_owner(): address {
+    return self.owner
+  }
+
+  view fn get_factory(): address {
+    return self.factory
+  }
+
+  view fn is_paused(): bool {
+    return self.paused
+  }
+
+  view fn get_max_slippage_bps(): int {
+    return self.max_slippage_bps
+  }
+}

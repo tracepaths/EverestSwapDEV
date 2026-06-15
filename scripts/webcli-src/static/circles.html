@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>octra circles</title>
+<link rel="stylesheet" href="style.css?v=3">
+<style>
+.circle-shell {
+  display: block;
+}
+
+.circle-stack {
+  display: grid;
+  gap: 0;
+}
+
+.circle-meta {
+  padding: 10px;
+}
+
+.circle-meta-row {
+  padding: 6px 0;
+  border-bottom: 1px solid #E5E9EF;
+}
+
+.circle-meta-row:last-child {
+  border-bottom: 0;
+}
+
+.circle-meta-key {
+  font-size: 11px;
+  color: #8C9DB6;
+  text-transform: lowercase;
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.circle-meta-value {
+  color: #3B567F;
+  word-break: break-all;
+}
+
+.circle-preview-head {
+  padding: 8px 10px;
+  background: #F6F7F9;
+  border-bottom: 1px solid #E5E9EF;
+  color: #8C9DB6;
+  word-break: break-all;
+}
+
+.circle-preview-body {
+  background: #fff;
+  min-height: 640px;
+}
+
+.circle-preview-frame {
+  width: 100%;
+  min-height: 640px;
+  border: 0;
+  background: #fff;
+}
+
+.circle-preview-text {
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #F6F7F9;
+  color: #3B567F;
+  min-height: 640px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  line-height: 150%;
+}
+
+.circle-preview-image {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 10px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.circle-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.circle-browser-card,
+.circle-preview-card,
+.circle-collapse {
+  border-top: 1px solid #E5E9EF;
+}
+
+.circle-browser-card .form-area,
+.circle-preview-card,
+.circle-collapse-body {
+  background: #fff;
+}
+
+.circle-preview-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #5A7BAA;
+  font-family: Tahoma, arial, sans-serif;
+  font-size: 12px;
+  text-decoration: none;
+  border-bottom: 1px dashed #5A7BAA;
+  cursor: pointer;
+  text-transform: lowercase;
+}
+
+.circle-preview-link:hover {
+  color: #3B567F;
+  border-bottom-color: #3B567F;
+}
+
+.circle-preview-link[hidden] {
+  display: none !important;
+}
+
+.circle-preview-host {
+  display: flex;
+  flex-direction: column;
+}
+
+.circle-browser-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.circle-browser-address {
+  min-width: 0;
+}
+
+.circle-browser-passphrase {
+  min-width: 0;
+}
+
+.circle-browser-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-self: start;
+  padding-top: 13px;
+}
+
+.circle-browser-actions-inline {
+  padding-top: 13px;
+}
+
+.circle-summary {
+  list-style: none;
+}
+
+.circle-summary::-webkit-details-marker {
+  display: none;
+}
+
+.circle-summary::marker {
+  display: none;
+}
+
+.circle-summary-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.circle-summary-note {
+  color: #8C9DB6;
+  font-size: 11px;
+  font-weight: normal;
+  text-transform: none;
+}
+
+.circle-summary-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid #8C9DB6;
+  transition: transform 0.15s;
+}
+
+.circle-collapse[open] .circle-summary-arrow {
+  transform: rotate(90deg);
+}
+
+.circle-collapse-body {
+  border-bottom: 1px solid #E5E9EF;
+}
+
+.circle-collapse-body .form-area {
+  border-bottom: 0;
+}
+
+.circle-authoring-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+}
+
+.circle-authoring-side {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.circle-authoring-main {
+  min-width: 0;
+}
+
+.circle-note {
+  color: #8C9DB6;
+  font-size: 11px;
+  line-height: 150%;
+}
+
+.circle-select,
+.circle-shell input[type="password"],
+.circle-shell input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.circle-shell input[type="file"] {
+  width: 100%;
+  font-size: 12px;
+  color: #3B567F;
+}
+
+.circle-upload-file {
+  padding-top: 6px;
+}
+
+.circle-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.circle-browser-overlay {
+  position: fixed;
+  inset: 16px;
+  z-index: 2400;
+  display: none;
+  flex-direction: column;
+  background: #F6F7F9;
+  border: 1px solid #C0C6D0;
+  box-shadow: 0 12px 28px rgba(59, 86, 127, 0.18);
+}
+
+.circle-browser-overlay.is-open {
+  display: flex;
+}
+
+.circle-browser-overlay-top {
+  background: #fff;
+  border-bottom: 1px solid #E5E9EF;
+  padding: 10px;
+}
+
+.circle-browser-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.circle-browser-overlay-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.circle-browser-overlay-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+.circle-browser-overlay-body .circle-preview-host {
+  flex: 1;
+  min-height: 0;
+}
+
+.circle-browser-overlay-body .circle-preview-head {
+  flex-shrink: 0;
+}
+
+.circle-browser-overlay-body .circle-preview-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.circle-browser-overlay-body .circle-preview-frame {
+  min-height: 0;
+  height: 100%;
+}
+
+body.circle-overlay-open {
+  overflow: hidden;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(59, 86, 127, 0.36);
+}
+
+.modal-box {
+  width: min(520px, calc(100vw - 40px));
+  border: 1px solid #C0C6D0;
+  background: #FFFFFF;
+  box-shadow: 0 12px 28px rgba(59, 86, 127, 0.18);
+  padding: 18px;
+}
+
+.modal-title {
+  color: #3B567F;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: lowercase;
+  margin-bottom: 10px;
+}
+
+.modal-message {
+  color: #3B567F;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.modal-btn {
+  border: 1px solid #C0C6D0;
+  background: #FFFFFF;
+  color: #3B567F;
+  font: inherit;
+  padding: 8px 14px;
+  cursor: pointer;
+  text-transform: lowercase;
+}
+
+.modal-btn-primary {
+  background: #EAF0F7;
+}
+
+@media (max-width: 980px) {
+  .circle-browser-fields,
+  .circle-authoring-grid,
+  .circle-browser-overlay-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .circle-browser-actions {
+    justify-content: flex-start;
+  }
+}
+</style>
+</head>
+<body>
+<div class="wrap circle-shell">
+  <header>
+    <div class="left">
+      <div class="title">octra_wallet</div>
+      <div class="subtitle">alpha version of the browser for circles and native programs (night build)</div>
+    </div>
+    <div class="hdr-right-group">
+      <div class="right online">circle viewer</div>
+    </div>
+  </header>
+
+  <div class="nav-tabs">
+    <a href="index.html">wallet</a>
+    <a href="#" class="active">circles</a>
+  </div>
+
+  <div class="content-area">
+    <div class="circle-stack">
+      <div class="circle-browser-card">
+        <div class="section-title">circle browser</div>
+        <div class="form-area">
+          <div class="circle-browser-fields">
+            <div class="form-row circle-browser-address">
+              <label for="circle-id">circle uri or id</label>
+              <input id="circle-id" type="text" placeholder="oct://oct.../index.html or oct...">
+            </div>
+            <div class="form-row circle-browser-passphrase">
+              <label for="sealed-passphrase">sealed read passphrase</label>
+              <input id="sealed-passphrase" type="password" placeholder="required for sealed_read resources">
+            </div>
+            <div class="circle-browser-actions">
+              <button class="action-btn" id="load-btn" type="button">open</button>
+            </div>
+          </div>
+          <div class="circle-note">simple viewing mode: paste an `oct://...` address, enter the sealed read key if needed, this will open the resource.</div>
+          <div class="msg-box" id="status">idle</div>
+        </div>
+      </div>
+
+      <details class="circle-collapse">
+        <summary class="section-title circle-summary">
+          <span class="circle-summary-line">
+            <span>circle info</span>
+            <span class="circle-summary-note" id="meta-summary-note">no information yet</span>
+            <span class="circle-summary-arrow"></span>
+          </span>
+        </summary>
+        <div class="circle-collapse-body">
+          <div class="circle-meta" id="meta"></div>
+        </div>
+      </details>
+
+      <div class="circle-preview-card">
+        <div class="section-title">
+          <span class="circle-summary-line">
+            <span>resource preview</span>
+            <button class="circle-preview-link" id="preview-expand-btn" type="button" hidden>expand</button>
+          </span>
+        </div>
+        <div class="circle-preview-host" id="preview-inline-host">
+          <div class="circle-preview-head" id="preview-head">no asset loaded</div>
+          <div class="circle-preview-body" id="preview-body"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer">octra_wallet | circles preview | local alpha</div>
+</div>
+
+<div class="circle-browser-overlay" id="preview-overlay">
+  <div class="circle-browser-overlay-top">
+    <div class="circle-browser-overlay-header">
+      <div class="section-title">expanded browser</div>
+      <button class="circle-preview-link" id="preview-overlay-close" type="button">close</button>
+    </div>
+    <div class="circle-browser-overlay-controls">
+      <div class="form-row circle-browser-address">
+        <label for="overlay-circle-id">circle uri or id</label>
+        <input id="overlay-circle-id" type="text" placeholder="oct://oct.../index.html or oct...">
+      </div>
+      <div class="form-row circle-browser-passphrase">
+        <label for="overlay-sealed-passphrase">sealed read passphrase</label>
+        <input id="overlay-sealed-passphrase" type="password" placeholder="required for sealed_read resources">
+      </div>
+      <div class="circle-browser-actions circle-browser-actions-inline">
+        <button class="action-btn" id="overlay-open-btn" type="button">open</button>
+      </div>
+    </div>
+  </div>
+  <div class="circle-browser-overlay-body">
+    <div class="circle-preview-host" id="preview-overlay-host"></div>
+  </div>
+</div>
+
+<script src="circles.js?v=1"></script>
+</body>
+</html>

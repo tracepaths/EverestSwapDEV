@@ -1,0 +1,235 @@
+contract WOCT {
+  state {
+    name: string
+    symbol: string
+    // [V2-AUDIT-FIX V2-LOW-3] total_supply is backed 1:1 by native OCT locked in this contract.
+    // It grows with each deposit and shrinks with each withdrawal.
+    // There is no hard max_supply enforced by this contract because: (a) native OCT supply is
+    // itself bounded by the Octra protocol, and (b) adding an arbitrary cap would break the
+    // wrapping guarantee.  See the max_deposit_per_tx limit for a per-transaction rate limiter.
+    total_supply: int
+    decimals: int
+    owner: address
+    balances: map[address]int
+    grants: map[address]map[address]int
+    paused: bool
+    // [AUDIT-FIX NEW-21] Limit deposit per transaction to reduce whale manipulation
+    max_deposit_per_tx: int
+    // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership transfer
+    pending_owner: address
+    // [AUDIT-FIX] Reentrancy guard
+    locked: bool
+  }
+
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+  event Mint(to: address, amount: int)
+  event Burn(from: address, amount: int)
+  event Paused(status: bool)
+  // [V2-AUDIT-FIX V2-CRIT-4] Event for owner-rescue of unaccounted native OCT
+  event NativeRescued(to: address, amount: int)
+  // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership events (mirrors SwapPool)
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
+
+  constructor() {
+    self.name = "Wrapped OCT"
+    self.symbol = "WOCT"
+    self.total_supply = 0
+    self.decimals = 6
+    self.owner = origin
+    self.paused = false
+    // [AUDIT-FIX NEW-21] Default: no limit (0 = unlimited)
+    self.max_deposit_per_tx = 0
+    // [V2-AUDIT-FIX V2-LOW-2] No pending owner at construction
+    self.pending_owner = origin
+    // [AUDIT-FIX] No reentrancy lock at construction
+    self.locked = false
+  }
+
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
+
+  view fn allowance(owner_addr: address, spender: address): int {
+    return self.grants[owner_addr][spender]
+  }
+
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn is_paused(): bool { return self.paused }
+
+  // [AUDIT-FIX HIGH-6] deposit: validate value > 0, mint 1:1, CEI pattern
+  // [V2-AUDIT-FIX V2-CRIT-4] Note: if native OCT is sent to this contract without calling
+  //   deposit() (e.g. via a direct transfer at the protocol level), those OCT are unaccounted
+  //   in total_supply and balances.  The rescue_native() function below allows the owner to
+  //   retrieve such excess OCT.  On the current Octra devnet, arbitrary native transfers to
+  //   contracts are not expected, but the safety valve is provided for defense-in-depth.
+  payable fn deposit(): int {
+    require(!self.paused, "contract paused")
+    require(value > 0, "zero amount")
+    // [AUDIT-FIX NEW-21] Check per-tx deposit limit if configured
+    require(self.max_deposit_per_tx == 0 || value <= self.max_deposit_per_tx, "deposit exceeds limit")
+    let amt = value
+    // [AUDIT-FIX] CEI: Update balance and total_supply before emitting events
+    self.balances[caller] = self.balances[caller] + amt
+    self.total_supply = self.total_supply + amt
+    emit Mint(caller, amt)
+    emit Transfer("", caller, amt)
+    return amt
+  }
+
+  // [AUDIT-FIX HIGH-6] withdraw: burn first (CEI), then native_transfer OCT
+  // [V2-AUDIT-FIX V2-HIGH-4] Atomicity assumption: on Octra, native_transfer is executed
+  //   atomically within the same transaction.  If native_transfer fails, the AML runtime
+  //   reverts the entire transaction, restoring the caller's WOCT balance and total_supply.
+  //   This prevents the scenario where the burn succeeds but the OCT transfer does not.
+  //   If the Octra runtime semantics change such that native_transfer is NOT atomic with
+  //   the rest of the transaction, a pull-over-push pattern would be needed (i.e., track
+  //   pending withdrawals in a map and let users claim OCT in a separate call).
+  fn withdraw(amt: int): bool {
+    require(!self.paused, "contract paused")
+    require(!self.locked, "reentrancy guard")
+    require(amt > 0, "zero amount")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+
+    self.locked = true
+
+    // [AUDIT-FIX HIGH-6] CEI: Reduce WOCT balance and total_supply BEFORE native_transfer
+    self.balances[caller] = bal - amt
+    self.total_supply = self.total_supply - amt
+
+    // [AUDIT-FIX] Emit burn events before the transfer (CEI)
+    emit Burn(caller, amt)
+    emit Transfer(caller, "", amt)
+
+    // [AUDIT-FIX HIGH-6] native_transfer sends native OCT — called last per CEI pattern
+    // [V2-AUDIT-FIX V2-HIGH-4] Atomic with TX revert on failure — see comment above.
+    transfer(caller, amt)
+
+    self.locked = false
+
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-MED-2] Removed the self-transfer restriction (to != caller).
+  //   Self-transfer is not a security issue; some protocols use it as a notification
+  //   mechanism.  The previous check unnecessarily limited composability.
+  fn transfer(to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    // [AUDIT-FIX] CEI: update state before transfer
+    self.balances[caller] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    emit Transfer(caller, to, amt)
+    return true
+  }
+
+  fn grant(spender: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(spender)
+    // [AUDIT-FIX NEW-16] Prevent grant to zero address
+    require(spender != "", "grant to zero address")
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  fn pull(from: address, to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    // [AUDIT-FIX] CEI: Update state before transfer
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // [V3-AUDIT-FIX] transfer_from: OCS01 compliance interface function.
+  // Duplicated the body of pull because internal contract calls (self.pull) are not supported by the AML compiler.
+  fn transfer_from(from: address, to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // [AUDIT-FIX LOW-4] Emergency pause
+  fn set_paused(status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    self.paused = status
+    emit Paused(status)
+    return true
+  }
+
+  // [AUDIT-FIX NEW-21] Set per-tx deposit limit
+  fn set_max_deposit_per_tx(limit: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(limit >= 0, "limit must be non-negative")
+    self.max_deposit_per_tx = limit
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-CRIT-4] rescue_native: owner can retrieve native OCT that was sent
+  // directly to this contract (without calling deposit()), i.e. the surplus of the
+  // contract's native balance over total_supply.  This prevents OCT from being permanently
+  // trapped due to accidental or malicious direct transfers.
+  fn rescue_native(): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    // The surplus is the contract's actual native balance minus what is owed to WOCT holders.
+    // We use balance(self_addr) to query the contract's OCT balance.
+    self.locked = true
+    let contract_balance = balance(self_addr)
+    require(contract_balance > self.total_supply, "no surplus to rescue")
+    let surplus = contract_balance - self.total_supply
+    transfer(self.owner, surplus)
+    emit NativeRescued(self.owner, surplus)
+    self.locked = false
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership transfer — step 1: propose
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(new_owner)
+    // [AUDIT-FIX NEW-13] Validate new_owner is not zero
+    require(new_owner != "", "new owner is zero address")
+    self.pending_owner = new_owner
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] Step 2: proposed new owner must accept
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = origin
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] View pending owner
+  view fn get_pending_owner(): address {
+    return self.pending_owner
+  }
+}
