@@ -1,49 +1,53 @@
-# EverestSwap
+# EverestSwap Backend
 
-A decentralized exchange (DEX) on Octra Network (Devnet) built with AppliedML (AML).
+Smart contracts, deployment scripts, and tooling for EverestSwap DEX on Octra Network.
 
 ## Features
 
-- **Swap** — Constant-product AMM (x\*y=k) with 0.3% fee
+- **Swap** — Constant-product AMM (x*y=k) with 0.3% fee
 - **Liquidity** — Add/remove liquidity, earn LP tokens
-- **Limit Orders** — Place and fill limit orders
-- **DCA** — Dollar-cost averaging strategies
+- **Pool Creation** — Permissionless pool registration via factory
+- **Token Standard** — OCS01 ERC20-compatible tokens
 
-## Contracts (Devnet)
+## Repos
+
+| Repo | Description |
+|------|-------------|
+| [tracepaths/EverestSwap](https://github.com/tracepaths/EverestSwap) | Frontend — React + Vite + TypeScript |
+| [tracepaths/EverestSwapDEV](https://github.com/tracepaths/EverestSwapDEV) | Backend (this repo) — contracts, scripts, deployment |
+
+## Contracts (Devnet — V6)
 
 | Contract | Address |
 |---|---|
 | OES Token | `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD` |
-| SwapPool | `oct7NFoitzUc5xYE4YRPwqVHigmFiBHYSfQEJ1eLg3jCTjU` |
-| SwapFactory | `oct53kXW7VFzPh9At6VfzecThJNc5riHoeBG63hEUZZtjm7` |
-| Router | `octAT2biFkboZGvtNUeQSaemYjHFjPFaiRqq7A22YDzJup3` |
-| LimitOrder | `oct4AjSxvKqcxJ6WAcR1DhphdtJkDxcZG5HYPi4qqwrL9qz` |
-| DCA | `oct3wZHLn3JCQqtmtWt6rimkbrxvH9txiktdUAbFuXaJ42f` |
+| WOCT | `oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe` |
+| SwapPool | `octSM8utNG3MLv4Fk2oY1SA2XR99o2i22QUSLbr7Te2tSM4` |
+| SwapFactory | `oct6znV2kFvbNnVpQRWKUq3Hw2mhPEW5Yi5NCJfAVPhQrsE` |
+| Router | `oct53wqh6cng95sjLTeLGdSWfNNtfnxy8W3A7H4NK9XmQzY` |
 
-## Pool Status
+## Project Structure
 
-- **Liquidity**: 10 OCT / 200,000 OES
-- **LP minted**: 2,000,000,000,000,000,000 LP
-- **Fee**: 0.3%
+```
+contracts/       AML smart contracts (*.aml)
+scripts/         deploy.js, liquidity.js, test-swap.js, etc.
+indexer/         Price indexer
+```
 
 ## Setup
 
 ```bash
 npm install
-cd frontend && npm install && npm run dev
+node scripts/deploy.js              # Deploy all V6 contracts
+node scripts/setup-liquidity.js     # Seed liquidity
+node scripts/test-swap.js           # Test swap flow
 ```
-
-## Development
-
-- `contracts/` — AML smart contracts
-- `frontend/` — React + Vite + TypeScript + Tailwind CSS v4
-- `scripts/` — Deployment and interaction scripts
 
 ## RPC
 
-- Devnet: `https://devnet.octrascan.io/rpc`
-- Mainnet: `https://octra.network/rpc`
+- **Devnet**: `https://devnet.octrascan.io/rpc`
+- **Mainnet**: `https://octra.network/rpc`
 
-## Deployer
+## License
 
-Wallet: `octGXi34vZfYwi3idjSa6m34vLJCoJHNMNAGeHyqh7JVEvy`
+MIT
