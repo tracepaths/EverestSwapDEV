@@ -55,6 +55,8 @@ contract Token {
 
   fn grant(spender: address, amt: int): bool {
     assert_address(spender)
+    // [SECURITY] Prevent grant to zero address
+    require(spender != "", "grant to zero address")
     self.grants[caller][spender] = amt
     emit Grant(caller, spender, amt)
     return true

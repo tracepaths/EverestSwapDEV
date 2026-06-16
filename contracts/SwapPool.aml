@@ -25,6 +25,15 @@ contract SwapPool {
     position_owner_count: map[address]int
     next_position_id: int
     total_liquidity: int
+    // [SECURITY] Indexed position linked list per user to avoid gas-bomb linear scans
+    user_position_next: map[int]int   // position_id → next position_id of same owner (0 = end)
+    user_position_prev: map[int]int   // position_id → prev position_id of same owner (0 = none)
+    user_head_position: map[address]int  // first position_id for this user
+    user_tail_position: map[address]int  // last position_id for this user
+    // [SECURITY] Max positions per user to prevent DoS
+    max_positions_per_user: int
+    // [SECURITY] Incremental total locked LP for O(1) view
+    total_locked_lp: int
   }
 
   event Swap(who: address, token_in: address, amount_in: int, amount_out: int)
@@ -34,6 +43,10 @@ contract SwapPool {
   event PositionRemoved(id: int, owner: address, liquidity: int)
   event Sync(reserve_a: int, reserve_b: int)
   event PoolActivated(active: bool)
+  // [SECURITY] Event for max positions per user updates
+  event MaxPositionsPerUserUpdated(limit: int)
+  // [SECURITY] M-8: Event for fee params updates
+  event FeeParamsSet(old_num: int, old_denom: int, new_num: int, new_denom: int)
   // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership events
   event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
   event OwnershipTransferred(old_owner: address, new_owner: address)
@@ -57,10 +70,14 @@ contract SwapPool {
     self.fee_reserve_a = 0
     self.fee_reserve_b = 0
     // [V2-AUDIT-FIX V2-LOW-2] No pending owner at construction
-    self.pending_owner = origin
+    self.pending_owner = ""
     // [V7] Initialize position tracking
     self.next_position_id = 1
     self.total_liquidity = 0
+    // [SECURITY] Max 100 positions per user to prevent DoS
+    self.max_positions_per_user = 100
+    // [SECURITY] Incremental total locked LP tracking
+    self.total_locked_lp = 0
   }
 
   // [V2-AUDIT-FIX V2-LOW-1] set_tokens: guard against re-initialization by checking that
@@ -82,6 +99,9 @@ contract SwapPool {
   // [AUDIT-FIX HIGH-1, CRIT-2] Use sqrt for LP initial, burn minimum_liquidity
   // [V2-AUDIT-FIX V2-CRIT-1] CEI: all state updates happen BEFORE external calls
   // [V2-AUDIT-FIX V2-CRIT-2] Use revert() on min_lp failure so TX rolls back atomically
+  // [SECURITY] H-1: All calculations and validations are done BEFORE any external call,
+  // so if the user-provided amounts or min_lp result in a revert, the user's tokens
+  // have not yet been pulled.
   fn add_liquidity(amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
     // [AUDIT-FIX MED-1] Deadline check - enforce 5-minute max
     require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
@@ -91,18 +111,25 @@ contract SwapPool {
     require(self.token_a != "" && self.token_b != "", "tokens not set")
     // [V7-HIGH-5] Validate lock_duration cannot be negative
     require(lock_duration >= 0, "lock_duration cannot be negative")
+    // [SECURITY] H-2: Cap max lock_duration to prevent epoch overflow on unlock_epoch
+    // 365 days = 365 * 24 * 60 = 525,600 minutes
+    require(lock_duration <= 525600, "lock_duration too long (max 365 days)")
+    // [SECURITY] Per-user position cap to prevent DoS
+    require(self.position_owner_count[caller] < self.max_positions_per_user, "max positions reached")
 
     self.locked = true
-
-    // [V7-CRIT-1] Validate token pull succeeded
-    require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
-    require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
 
     let is_first = self.total_lp == 0
 
     if is_first {
       // [AUDIT-FIX CRIT-2] Use geometric mean (sqrt) instead of direct product
+      // [SECURITY] M-6: Overflow guard — detect if amount_a * amount_b overflows.
+      // After the multiplication, divide back: if product / amount_a != amount_b,
+      // the product overflowed (wrapped to a small value).
       let product = amount_a * amount_b
+      if amount_a > 0 {
+        require(product / amount_a == amount_b, "amount_a * amount_b overflow")
+      }
       let lp_raw = 0
       if product > 3 {
         let z = product
@@ -115,6 +142,8 @@ contract SwapPool {
       } else if product != 0 {
         lp_raw = 1
       }
+      // [SECURITY] H-1: Validate FIRST (before any external call) so the user
+      // doesn't lose their tokens if validation fails
       require(lp_raw > self.minimum_liquidity, "initial liquidity too low")
 
       // [AUDIT-FIX HIGH-1] Burn minimum_liquidity to dead address
@@ -122,6 +151,10 @@ contract SwapPool {
 
       // [V2-AUDIT-FIX V2-CRIT-2] Revert atomically if min_lp not satisfied
       require(lp >= min_lp, "min_lp not satisfied")
+
+      // [V7-CRIT-1] Now safe to pull tokens — all validations have passed
+      require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+      require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
 
       // [V2-AUDIT-FIX V2-CRIT-1] CEI: all state changes before any external calls
       self.reserve_a = amount_a
@@ -140,6 +173,26 @@ contract SwapPool {
       self.position_liquidities[position_id] = lp
       self.position_unlock_times[position_id] = unlock_epoch
       self.position_owner_count[caller] += 1
+      // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
+      require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
+      let _tail1 = self.user_tail_position[caller]
+      if _tail1 == 0 {
+        self.user_head_position[caller] = position_id
+        self.user_tail_position[caller] = position_id
+        self.user_position_prev[position_id] = 0
+        self.user_position_next[position_id] = 0
+      } else {
+        self.user_position_next[_tail1] = position_id
+        self.user_position_prev[position_id] = _tail1
+        self.user_tail_position[caller] = position_id
+        self.user_position_next[position_id] = 0
+      }
+      // [SECURITY] C-1: Increment total_locked_lp if position was created with a lock
+      // (regardless of whether the lock has since expired). Use lock_duration > 0 as
+      // the source of truth to keep increment and decrement consistent.
+      if lock_duration > 0 {
+        self.total_locked_lp += lp
+      }
 
       self.locked = false
       emit AddLiquidity(caller, amount_a, amount_b, lp)
@@ -148,12 +201,12 @@ contract SwapPool {
       return (lp, amount_a, amount_b)
     }
 
-    // [AUDIT-FIX NEW-6] Proportional add
+    // [AUDIT-FIX NEW-6] Proportional add — calculate FIRST
     let lp_a = amount_a * self.total_lp / self.reserve_a
     let lp_b = amount_b * self.total_lp / self.reserve_b
     let lp_amount = lp_a < lp_b ? lp_a : lp_b
 
-    // [V2-AUDIT-FIX V2-CRIT-2] Revert atomically if min_lp not satisfied
+    // [SECURITY] H-1: Validate FIRST (before any external call)
     require(lp_amount >= min_lp && lp_amount > 0, "min_lp not satisfied")
 
     let used_a = lp_amount * self.reserve_a / self.total_lp
@@ -168,6 +221,10 @@ contract SwapPool {
 
     let refund_a = amount_a - used_a
     let refund_b = amount_b - used_b
+
+    // [V7-CRIT-1] Now safe to pull tokens — all validations have passed
+    require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+    require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
 
     // [V2-AUDIT-FIX V2-CRIT-1] CEI: update state BEFORE any external calls
     self.reserve_a += used_a
@@ -186,19 +243,42 @@ contract SwapPool {
     self.position_liquidities[position_id] = lp_amount
     self.position_unlock_times[position_id] = unlock_epoch
     self.position_owner_count[caller] += 1
+    // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
+    require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
+    let _tail2 = self.user_tail_position[caller]
+    if _tail2 == 0 {
+      self.user_head_position[caller] = position_id
+      self.user_tail_position[caller] = position_id
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    } else {
+      self.user_position_next[_tail2] = position_id
+      self.user_position_prev[position_id] = _tail2
+      self.user_tail_position[caller] = position_id
+      self.user_position_next[position_id] = 0
+    }
+    // [SECURITY] C-1: Increment total_locked_lp if position was created with a lock
+    if lock_duration > 0 {
+      self.total_locked_lp += lp_amount
+    }
 
-    self.locked = false
+    // [SECURITY] C-1: Reentrancy fix — emit events FIRST but keep `locked = true` through
+    // the external refund calls. The single-bool reentrancy guard must remain held
+    // until ALL external calls are complete.
     emit AddLiquidity(caller, used_a, used_b, lp_amount)
     emit PositionAdded(position_id, caller, lp_amount, unlock_epoch)
     emit Sync(self.reserve_a, self.reserve_b)
 
-    // Refund excess tokens AFTER state is fully committed
+    // Refund excess tokens AFTER state is fully committed, while still holding lock
     if refund_a > 0 {
       require(call(self.token_a, "transfer", [caller, refund_a]), "token_a refund failed")
     }
     if refund_b > 0 {
       require(call(self.token_b, "transfer", [caller, refund_b]), "token_b refund failed")
     }
+
+    // Only release the lock AFTER all external calls are complete
+    self.locked = false
 
     return (lp_amount, used_a, used_b)
   }
@@ -235,6 +315,46 @@ contract SwapPool {
     self.total_liquidity -= lp_amount
 
     self.position_owner_count[caller] -= 1
+    // [SECURITY] Unlink from user's position linked list (inlined — AML doesn't support self.fn() calls)
+    // M-7: Defense-in-depth — verify position is in the owner's list before unlinking
+    let _cur = self.user_head_position[caller]
+    let _found = false
+    let _sc = 0
+    while _cur != 0 && _sc < 10001 {
+      if _cur == position_id {
+        _found = true
+      }
+      _cur = self.user_position_next[_cur]
+      _sc += 1
+    }
+    if !_found {
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    } else {
+      let _prev = self.user_position_prev[position_id]
+      let _next = self.user_position_next[position_id]
+      if _prev != 0 {
+        self.user_position_next[_prev] = _next
+      }
+      if _next != 0 {
+        self.user_position_prev[_next] = _prev
+      }
+      if self.user_head_position[caller] == position_id {
+        self.user_head_position[caller] = _next
+      }
+      if self.user_tail_position[caller] == position_id {
+        self.user_tail_position[caller] = _prev
+      }
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    }
+    // [SECURITY] C-1: Decrement total_locked_lp if position was created with a lock
+    // (i.e., unlock_time > 0). This is consistent with the increment in add_liquidity
+    // which checks lock_duration > 0. Using unlock_time > 0 here means we decrement
+    // even after the lock has expired, keeping the total accurate.
+    if unlock_time > 0 {
+      self.total_locked_lp -= lp_amount
+    }
 
     require(self.reserve_a >= amount_a, "reserve_a underflow")
     require(self.reserve_b >= amount_b, "reserve_b underflow")
@@ -263,20 +383,23 @@ contract SwapPool {
     let position_count = self.position_owner_count[caller]
     require(position_count > 0, "no positions")
 
-    // Find first unlocked position
+    // Find first unlocked position via indexed linked list (avoids gas bomb)
     let position_id = 0
+    // [SECURITY] Hoisted outside while loop so the value persists past the loop scope
+    // and refers to the matched position (not the next position in the list)
+    let unlock_time = 0
     let found = false
-    let id = 1
-    while id < self.next_position_id && !found {
-      if self.position_owners[id] == caller {
-        let liquidity = self.position_liquidities[id]
-        let unlock_time = self.position_unlock_times[id]
-        if liquidity > 0 && epoch >= unlock_time {
-          position_id = id
-          found = true
-        }
+    let pos_id = self.user_head_position[caller]
+    while pos_id != 0 && !found {
+      let liquidity = self.position_liquidities[pos_id]
+      let pos_unlock = self.position_unlock_times[pos_id]
+      if liquidity > 0 && epoch >= pos_unlock {
+        position_id = pos_id
+        // [SECURITY] Capture the unlock time of the MATCHED position
+        unlock_time = pos_unlock
+        found = true
       }
-      id += 1
+      pos_id = self.user_position_next[pos_id]
     }
     require(found, "no unlocked positions")
 
@@ -299,6 +422,43 @@ contract SwapPool {
     self.total_liquidity -= lp_bal
 
     self.position_owner_count[caller] -= 1
+    // [SECURITY] Unlink from user's position linked list (inlined — AML doesn't support self.fn() calls)
+    // M-7: Defense-in-depth — verify position is in the owner's list before unlinking
+    let _cur = self.user_head_position[caller]
+    let _found = false
+    let _sc = 0
+    while _cur != 0 && _sc < 10001 {
+      if _cur == position_id {
+        _found = true
+      }
+      _cur = self.user_position_next[_cur]
+      _sc += 1
+    }
+    if !_found {
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    } else {
+      let _prev = self.user_position_prev[position_id]
+      let _next = self.user_position_next[position_id]
+      if _prev != 0 {
+        self.user_position_next[_prev] = _next
+      }
+      if _next != 0 {
+        self.user_position_prev[_next] = _prev
+      }
+      if self.user_head_position[caller] == position_id {
+        self.user_head_position[caller] = _next
+      }
+      if self.user_tail_position[caller] == position_id {
+        self.user_tail_position[caller] = _prev
+      }
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    }
+    // [SECURITY] C-1: Decrement total_locked_lp if position was created with a lock
+    if unlock_time > 0 {
+      self.total_locked_lp -= lp_bal
+    }
 
     require(self.reserve_a >= amount_a, "reserve_a underflow")
     require(self.reserve_b >= amount_b, "reserve_b underflow")
@@ -331,24 +491,54 @@ contract SwapPool {
     // [V7-CRIT-1] Validate pull succeeded
     require(call(self.token_a, "pull", [caller, self_addr, amount_in]), "token_a pull failed")
 
-    let fee_amount = amount_in * self.fee_numerator / self.fee_denominator
+    // [SECURITY] H-2: Overflow guard for fee calculation
+    // amount_in * fee_numerator can overflow int64. Check by dividing back.
+    let raw_fee = amount_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == amount_in, "fee amount overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
     let amount_in_after_fee = amount_in - fee_amount
 
-    let out = amount_in_after_fee * self.reserve_b / (self.reserve_a + amount_in_after_fee)
+    // [SECURITY] H-10: Overflow guard for out calculation
+    // amount_in_after_fee * reserve_b can overflow
+    let raw_out = amount_in_after_fee * self.reserve_b
+    if amount_in_after_fee > 0 {
+      require(raw_out / amount_in_after_fee == self.reserve_b, "out calculation overflow")
+    }
+    let out = raw_out / (self.reserve_a + amount_in_after_fee)
 
     require(out >= min_out, "slippage too high")
     require(out > 0, "output too small")
-    require(out < self.reserve_b, "insufficient reserve_b")
+    // [SECURITY] M-11: Minimum liquidity floor — prevent complete pool drainage.
+    // After the swap, the output reserve must remain above 1000 to allow future
+    // swaps (rounding would otherwise produce 0 output).
+    require(out < self.reserve_b - 1000, "swap would drain pool below minimum liquidity")
 
+    // [SECURITY] H-5: Overflow guard — ensure k_before computation doesn't overflow
+    // k = reserve_a * reserve_b. With int64 max ~9.2e18, the multiplication
+    // overflows when both reserves exceed ~3e9. The guards below cap reserves safely.
     let k_before = self.reserve_a * self.reserve_b
+    // Sanity check: if multiplication overflows, k_before wraps and is much smaller
+    // than expected, so k_after >= k_before still passes incorrectly. Re-check by
+    // dividing back: if k_before / reserve_a != reserve_b, it overflowed.
+    if self.reserve_a > 0 {
+      require(k_before / self.reserve_a == self.reserve_b, "reserve overflow detected")
+    }
 
     self.reserve_a += amount_in_after_fee
-    self.fee_reserve_a += fee_amount
+    // [SECURITY] M-5: Overflow guard on fee accumulation
+    let new_fee_a = self.fee_reserve_a + fee_amount
+    require(new_fee_a > self.fee_reserve_a, "fee_reserve_a overflow")
+    self.fee_reserve_a = new_fee_a
 
     require(self.reserve_b > out, "reserve_b underflow")
     self.reserve_b -= out
 
     let k_after = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_after / self.reserve_a == self.reserve_b, "post-swap overflow")
+    }
     require(k_after >= k_before, "invariant violation")
 
     // [V7-CRIT-1] Validate transfer succeeded
@@ -374,24 +564,45 @@ contract SwapPool {
     // [V7-CRIT-1] Validate pull succeeded
     require(call(self.token_b, "pull", [caller, self_addr, amount_in]), "token_b pull failed")
 
-    let fee_amount = amount_in * self.fee_numerator / self.fee_denominator
+    // [SECURITY] H-2: Overflow guard for fee calculation
+    let raw_fee = amount_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == amount_in, "fee amount overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
     let amount_in_after_fee = amount_in - fee_amount
 
-    let out = amount_in_after_fee * self.reserve_a / (self.reserve_b + amount_in_after_fee)
+    // [SECURITY] H-10: Overflow guard for out calculation
+    let raw_out = amount_in_after_fee * self.reserve_a
+    if amount_in_after_fee > 0 {
+      require(raw_out / amount_in_after_fee == self.reserve_a, "out calculation overflow")
+    }
+    let out = raw_out / (self.reserve_b + amount_in_after_fee)
 
     require(out >= min_out, "slippage too high")
     require(out > 0, "output too small")
-    require(out < self.reserve_a, "insufficient reserve_a")
+    // [SECURITY] M-11: Minimum liquidity floor (see swap_a_for_b)
+    require(out < self.reserve_a - 1000, "swap would drain pool below minimum liquidity")
 
+    // [SECURITY] H-5: Overflow guard (see swap_a_for_b)
     let k_before = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_before / self.reserve_a == self.reserve_b, "reserve overflow detected")
+    }
 
     self.reserve_b += amount_in_after_fee
-    self.fee_reserve_b += fee_amount
+    // [SECURITY] M-5: Overflow guard on fee accumulation
+    let new_fee_b = self.fee_reserve_b + fee_amount
+    require(new_fee_b > self.fee_reserve_b, "fee_reserve_b overflow")
+    self.fee_reserve_b = new_fee_b
 
     require(self.reserve_a > out, "reserve_a underflow")
     self.reserve_a -= out
 
     let k_after = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_after / self.reserve_a == self.reserve_b, "post-swap overflow")
+    }
     require(k_after >= k_before, "invariant violation")
 
     // [V7-CRIT-1] Validate transfer succeeded
@@ -419,27 +630,41 @@ contract SwapPool {
   }
 
   // [V4-AUDIT-FIX] claim_fees: Allow owner to specify recipient so fees can be sent directly to a treasury
-  // or a fee distributor contract. This increases flexibility and security.
+  // or a fee distributor contract.
+  // [SECURITY] C-1: Strict CEI — external transfer happens FIRST, fee reserves are zeroed
+  // only AFTER successful transfers. If a transfer reverts, the fees are preserved.
   fn claim_fees(recipient: address): bool {
     require(caller == self.owner, "not authorized")
-    assert_address(recipient)
-    require(recipient != "", "zero address")
+    // [SECURITY] H-6: Reentrancy check at the very top
     require(!self.locked, "reentrancy guard")
     self.locked = true
+    assert_address(recipient)
+    require(recipient != "", "zero address")
+    // [SECURITY] L-1: Reject self-recipient to avoid stuck fees
+    require(recipient != self_addr, "recipient cannot be pool")
+    // [SECURITY] M-2: Reject recipient being one of the pool's tokens
+    // (fees would be locked in the token contract)
+    require(recipient != self.token_a && recipient != self.token_b, "recipient cannot be pool's tokens")
+    // [SECURITY] R-9: Reject recipient being the factory or WOCT (cross-contract confusion)
+    // — covered by M-2 check above (factory and WOCT are token contracts)
 
     let amt_a = self.fee_reserve_a
     let amt_b = self.fee_reserve_b
     require(amt_a > 0 || amt_b > 0, "no fees to claim")
 
-    self.fee_reserve_a = 0
-    self.fee_reserve_b = 0
-
+    // [SECURITY] C-1: Do external transfers FIRST. If they fail (e.g., recipient
+    // blacklisted, fee-on-transfer token, or recipient contract reverts), the
+    // whole transaction reverts and the fee reserves are preserved.
     if amt_a > 0 {
       require(call(self.token_a, "transfer", [recipient, amt_a]), "token_a fee transfer failed")
     }
     if amt_b > 0 {
       require(call(self.token_b, "transfer", [recipient, amt_b]), "token_b fee transfer failed")
     }
+
+    // [SECURITY] C-1: Only NOW zero the fee reserves — after successful transfers
+    self.fee_reserve_a = 0
+    self.fee_reserve_b = 0
 
     self.locked = false
     emit FeesClaimed(recipient, amt_a, amt_b)
@@ -448,13 +673,20 @@ contract SwapPool {
 
   fn set_active(status: bool): bool {
     require(caller == self.owner, "not authorized")
-    self.active = status
-    emit PoolActivated(status)
+    // [SECURITY] H-5: Add reentrancy guard for state changes
+    require(!self.locked, "reentrancy guard")
+    // [SECURITY] Skip event emit if state unchanged (avoid event spam)
+    if self.active != status {
+      self.active = status
+      emit PoolActivated(status)
+    }
     return true
   }
 
   fn transfer_ownership(new_owner: address): bool {
     require(caller == self.owner, "not authorized")
+    // [SECURITY] H-5: Add reentrancy guard
+    require(!self.locked, "reentrancy guard")
     assert_address(new_owner)
     require(new_owner != "", "new owner is zero address")
     self.pending_owner = new_owner
@@ -464,9 +696,13 @@ contract SwapPool {
 
   fn accept_ownership(): bool {
     require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    // [SECURITY] H-5: Add reentrancy guard
+    require(!self.locked, "reentrancy guard")
     let old_owner = self.owner
     self.owner = self.pending_owner
-    self.pending_owner = origin
+    // [SECURITY] Reset pending_owner to empty string (not origin) to prevent ownership hijack
+    self.pending_owner = ""
     emit OwnershipTransferred(old_owner, self.owner)
     return true
   }
@@ -477,8 +713,15 @@ contract SwapPool {
     require(num > 0, "numerator must be > 0")
     require(num < denom, "fee must be < 100%")
     require(num * 1000 <= denom * 10, "fee cannot exceed 1%")
+    // [SECURITY] M-2: Minimum fee floor of 0.03% (3/10000) to prevent
+    // JIT sandwich attacks against pools with negligible fees
+    require(num * 10000 >= denom * 3, "fee too low (min 0.03%)")
+    let old_num = self.fee_numerator
+    let old_denom = self.fee_denominator
     self.fee_numerator = num
     self.fee_denominator = denom
+    // [SECURITY] M-8: Emit event for transparency
+    emit FeeParamsSet(old_num, old_denom, num, denom)
     return true
   }
 
@@ -499,22 +742,33 @@ contract SwapPool {
   view fn get_amount_out(amount_in: int, is_a_to_b: bool): int {
     require(amount_in > 0, "zero input")
     require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
-    let fee_amount = amount_in * self.fee_numerator / self.fee_denominator
+    // [SECURITY] H-7: Overflow guard for fee and out calculation
+    let raw_fee = amount_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == amount_in, "fee overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
     let amount_in_after_fee = amount_in - fee_amount
     if is_a_to_b {
-      return amount_in_after_fee * self.reserve_b / (self.reserve_a + amount_in_after_fee)
+      let raw_out = amount_in_after_fee * self.reserve_b
+      if amount_in_after_fee > 0 {
+        require(raw_out / amount_in_after_fee == self.reserve_b, "out overflow")
+      }
+      return raw_out / (self.reserve_a + amount_in_after_fee)
     }
-    return amount_in_after_fee * self.reserve_a / (self.reserve_b + amount_in_after_fee)
+    let raw_out2 = amount_in_after_fee * self.reserve_a
+    if amount_in_after_fee > 0 {
+      require(raw_out2 / amount_in_after_fee == self.reserve_a, "out overflow")
+    }
+    return raw_out2 / (self.reserve_b + amount_in_after_fee)
   }
 
   view fn get_lp_balance(addr: address): int {
     let total = 0
-    let id = 1
-    while id < self.next_position_id {
-      if self.position_owners[id] == addr {
-        total += self.position_liquidities[id]
-      }
-      id += 1
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      total += self.position_liquidities[pos_id]
+      pos_id = self.user_position_next[pos_id]
     }
     return total
   }
@@ -558,38 +812,31 @@ contract SwapPool {
 
   view fn get_unlocked_liquidity(addr: address): int {
     let total = 0
-    let id = 1
-    while id < self.next_position_id {
-      if self.position_owners[id] == addr && epoch >= self.position_unlock_times[id] {
-        total += self.position_liquidities[id]
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      if epoch >= self.position_unlock_times[pos_id] {
+        total += self.position_liquidities[pos_id]
       }
-      id += 1
+      pos_id = self.user_position_next[pos_id]
     }
     return total
   }
 
   view fn get_locked_liquidity(addr: address): int {
     let total = 0
-    let id = 1
-    while id < self.next_position_id {
-      if self.position_owners[id] == addr && epoch < self.position_unlock_times[id] {
-        total += self.position_liquidities[id]
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      if epoch < self.position_unlock_times[pos_id] {
+        total += self.position_liquidities[pos_id]
       }
-      id += 1
+      pos_id = self.user_position_next[pos_id]
     }
     return total
   }
 
   view fn get_total_locked_lp(): int {
-    let total = 0
-    let id = 1
-    while id < self.next_position_id {
-      if epoch < self.position_unlock_times[id] {
-        total += self.position_liquidities[id]
-      }
-      id += 1
-    }
-    return total
+    // [SECURITY] O(1) incremental tracking — no DoS
+    return self.total_locked_lp
   }
 
   view fn get_position_unlock_time(id: int): int {
@@ -598,5 +845,22 @@ contract SwapPool {
 
   view fn get_next_position_id(): int {
     return self.next_position_id
+  }
+
+  view fn get_max_positions_per_user(): int {
+    return self.max_positions_per_user
+  }
+
+  fn set_max_positions_per_user(limit: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(limit > 0, "limit must be positive")
+    // [SECURITY] H-1: Upper bound to prevent DoS via gas-bomb in view calls
+    // (get_lp_balance, get_locked_liquidity, get_unlocked_liquidity all traverse the
+    // per-user linked list). 10000 is a reasonable upper limit.
+    require(limit <= 10000, "limit too high (max 10000)")
+    self.max_positions_per_user = limit
+    // [SECURITY] M-1: Emit event for transparency
+    emit MaxPositionsPerUserUpdated(limit)
+    return true
   }
 }

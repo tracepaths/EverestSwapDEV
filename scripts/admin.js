@@ -210,13 +210,20 @@ async function cmdView() {
 }
 
 async function cmdSetFee(mnemonic, numStr, denomStr) {
+  // [SECURITY] M-3: Strict integer parsing — reject decimals, non-digits
+  if (!/^\d+$/.test(String(numStr).trim()) || !/^\d+$/.test(String(denomStr).trim())) {
+    throw new Error('Fee must be positive integers (no decimals). Example: 3 1000 = 0.3%');
+  }
   const num = parseInt(numStr, 10);
   const denom = parseInt(denomStr, 10);
-  if (isNaN(num) || isNaN(denom) || num <= 0 || denom <= 0) {
+  if (num <= 0 || denom <= 0) {
     throw new Error('Fee must be positive integers. Example: 3 1000 = 0.3%');
   }
   if (num >= denom) throw new Error('numerator must be less than denominator');
+  // [SECURITY] M-3: Match the contract's 1% cap exactly to avoid silent override
   if (num * 1000 > denom * 10) throw new Error('Fee cannot exceed 1% (10/1000)');
+  // [SECURITY] M-3: Enforce minimum floor (matches contract's 0.03% floor)
+  if (num * 10000 < denom * 3) throw new Error('Fee too low (min 0.03%)');
 
   const d = loadDeployments();
   const { keypair, address } = getAddress(mnemonic);
@@ -275,12 +282,12 @@ async function cmdTransferOwnership(mnemonic, contractName, newOwner) {
     console.log(`Initiating ownership transfer for ${name} → ${newOwner}...`);
     nonce++;
     await callMethod(address, 'transfer_ownership', [newOwner], null, deployerAddr, nonce, keypair.secretKey);
-    console.log(`Done. New owner must call: node admin.js --mnemonic "..." accept-ownership ${contractName}`);
+    console.log(`Done. New owner must call: MNEMONIC="..." node admin.js accept-ownership ${contractName}`);
   } else if (TWO_STEP_SETTER.includes(key)) {
     console.log(`Initiating setter transfer for ${name} → ${newOwner}...`);
     nonce++;
     await callMethod(address, 'initiate_setter_transfer', [newOwner], null, deployerAddr, nonce, keypair.secretKey);
-    console.log(`Done. New setter must call: node admin.js --mnemonic "..." accept-ownership ${contractName}`);
+    console.log(`Done. New setter must call: MNEMONIC="..." node admin.js accept-ownership ${contractName}`);
   } else {
     console.log(`Transferring ownership of ${name} → ${newOwner}...`);
     nonce++;
@@ -354,7 +361,7 @@ function usage() {
   console.log(`
 EverestSwap Admin CLI
 
-Usage: node admin.js --mnemonic "<mnemonic>" <command> [args]
+Usage: MNEMONIC="your mnemonic phrase" node admin.js <command> [args]
 
 Commands:
   view                                                       Show all contract settings
@@ -370,12 +377,12 @@ Contracts:
   pool, factory, router, woct, oes
 
 Examples:
-  node admin.js --mnemonic "word1 word2 ..." view
-  node admin.js --mnemonic "word1 word2 ..." set-fee 5 1000
-  node admin.js --mnemonic "word1 word2 ..." claim-fees octABC...xyz
-  node admin.js --mnemonic "word1 word2 ..." set-fee-to octABC...xyz
-  node admin.js --mnemonic "word1 word2 ..." transfer-ownership pool octABC...xyz
-  node admin.js --mnemonic "word1 word2 ..." pause factory
+  MNEMONIC="word1 word2 ..." node admin.js view
+  MNEMONIC="word1 word2 ..." node admin.js set-fee 5 1000
+  MNEMONIC="word1 word2 ..." node admin.js claim-fees octABC...xyz
+  MNEMONIC="word1 word2 ..." node admin.js set-fee-to octABC...xyz
+  MNEMONIC="word1 word2 ..." node admin.js transfer-ownership pool octABC...xyz
+  MNEMONIC="word1 word2 ..." node admin.js pause factory
   `);
 }
 
@@ -387,17 +394,10 @@ async function main() {
     process.exit(0);
   }
 
-  let mnemonic = null;
-  const filteredArgs = [];
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--mnemonic' && args[i + 1]) {
-      mnemonic = args[i + 1];
-      i++;
-    } else {
-      filteredArgs.push(args[i]);
-    }
-  }
+  // [SECURITY] Load MNEMONIC from environment variable - NOT from CLI args
+  const mnemonic = process.env.MNEMONIC;
+  // [SECURITY] M-4: Case-insensitive filter — reject --MNEMONIC, --Mnemonic, etc.
+  const filteredArgs = args.filter(a => !/^--mnemonic=/i.test(a) && a.toLowerCase() !== '--mnemonic');
 
   const command = filteredArgs[0];
 
@@ -408,7 +408,8 @@ async function main() {
   }
 
   if (command !== 'view' && !mnemonic) {
-    console.error('Error: --mnemonic is required for write operations.');
+    console.error('Error: MNEMONIC environment variable is not set.');
+    console.error('Please set: export MNEMONIC="your mnemonic phrase"');
     process.exit(1);
   }
 
@@ -418,37 +419,37 @@ async function main() {
         await cmdView();
         break;
       case 'set-fee':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1] || !filteredArgs[2]) { console.error('Usage: set-fee <numerator> <denominator>'); process.exit(1); }
         await cmdSetFee(mnemonic, filteredArgs[1], filteredArgs[2]);
         break;
       case 'claim-fees':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1]) { console.error('Usage: claim-fees <recipient>'); process.exit(1); }
         await cmdClaimFees(mnemonic, filteredArgs[1]);
         break;
       case 'set-fee-to':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1]) { console.error('Usage: set-fee-to <address>'); process.exit(1); }
         await cmdSetFeeTo(mnemonic, filteredArgs[1]);
         break;
       case 'transfer-ownership':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1] || !filteredArgs[2]) { console.error('Usage: transfer-ownership <contract> <newOwner>'); process.exit(1); }
         await cmdTransferOwnership(mnemonic, filteredArgs[1], filteredArgs[2]);
         break;
       case 'accept-ownership':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1]) { console.error('Usage: accept-ownership <contract>'); process.exit(1); }
         await cmdAcceptOwnership(mnemonic, filteredArgs[1]);
         break;
       case 'pause':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1]) { console.error('Usage: pause <contract>'); process.exit(1); }
         await cmdPause(mnemonic, filteredArgs[1]);
         break;
       case 'unpause':
-        if (!mnemonic) { console.error('Error: --mnemonic required'); process.exit(1); }
+        if (!mnemonic) { console.error('Error: MNEMONIC environment variable is not set'); process.exit(1); }
         if (!filteredArgs[1]) { console.error('Usage: unpause <contract>'); process.exit(1); }
         await cmdUnpause(mnemonic, filteredArgs[1]);
         break;

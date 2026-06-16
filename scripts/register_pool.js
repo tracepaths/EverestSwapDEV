@@ -13,10 +13,15 @@ if (!MNEMONIC) {
 }
 const CALL_FEE_OU = '1500';
 
-const FACTORY_V2 = 'octEwgKA8zRxriLdvdrTuKNeimvHTSLqt6sX6KBCUTyQfxs';
-const USER_POOL = 'octjp1XhWGYr94ZyRRBN4ZMy76ZpZoKbWBdHtRZtw4UEjQ5';
-const WOCT = 'oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe';
-const OES = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+// [SECURITY] Load addresses from deployments.json; fall back to canonical OES only
+const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deployments.json'), 'utf-8'));
+const FACTORY_V2 = deployments.SwapFactory;
+const USER_POOL = deployments.SwapPool;
+const WOCT = deployments.WOCT;
+const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+if (!FACTORY_V2 || !USER_POOL || !WOCT) {
+  throw new Error('Required addresses missing in deployments.json (SwapFactory, SwapPool, WOCT)');
+}
 
 async function rpcCall(method, params) {
   const res = await fetch(RPC_URL, {

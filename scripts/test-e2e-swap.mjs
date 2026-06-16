@@ -1,11 +1,21 @@
 import crypto from 'crypto';
 import nacl from 'tweetnacl';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const RPC = 'https://devnet.octrascan.io/rpc';
-const DEPLOYER = 'octGXi34vZfYwi3idjSa6m34vLJCoJHNMNAGeHyqh7JVEvy';
-const WOCT = 'oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe';
-const POOL = 'oct7t3dFk1AyysnoVRwvcwqMLzgkTt8Sw78Lnuv32EtUx7r';
-const OES = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const RPC = process.env.RPC_URL || 'https://devnet.octrascan.io/rpc';
+
+// [SECURITY] Load addresses from deployments.json; fall back to canonical OES only
+const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deployments.json'), 'utf-8'));
+const WOCT = deployments.WOCT;
+const POOL = deployments.SwapPool;
+const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+if (!WOCT || !POOL) {
+  throw new Error('Required addresses missing in deployments.json (SwapPool, WOCT)');
+}
 
 async function rpc(method, params) {
   const res = await fetch(RPC, {
@@ -81,6 +91,19 @@ async function submitCall(from, to_, amount, nonce, ou, method, args, keypair, p
 
 const keypair = getDeployerKey();
 const pubKeyB64 = Buffer.from(keypair.secretKey.slice(32, 64)).toString('base64');
+
+// [SECURITY] Derive deployer address from keypair (not hardcoded)
+const bs58 = (await import('bs58')).default;
+const seed64 = crypto.pbkdf2Sync(process.env.MNEMONIC, 'mnemonic', 2048, 64, 'sha512');
+const hmac = crypto.createHmac('sha512', 'Octra seed');
+hmac.update(Buffer.from(seed64));
+const hdSeed32 = hmac.digest().slice(0, 32);
+const derivedKeypair = nacl.sign.keyPair.fromSeed(new Uint8Array(hdSeed32));
+const hash = crypto.createHash('sha256').update(Buffer.from(derivedKeypair.publicKey)).digest();
+let b58 = bs58.encode(hash);
+while (b58.length < 44) b58 = '1' + b58;
+const DEPLOYER = 'oct' + b58;
+console.log('Deployer:', DEPLOYER);
 
 // Get current nonce
 const bal = await rpc('octra_balance', [DEPLOYER]);

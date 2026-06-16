@@ -1,11 +1,11 @@
 import crypto from 'crypto';
 import nacl from 'tweetnacl';
 
-const RPC = 'https://devnet.octrascan.io/rpc';
-const DEPLOYER = 'octGXi34vZfYwi3idjSa6m34vLJCoJHNMNAGeHyqh7JVEvy';
-const WOCT = 'oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe';
-const POOL = 'oct7t3dFk1AyysnoVRwvcwqMLzgkTt8Sw78Lnuv32EtUx7r';
-const OES = 'octP5B8zHVBwJqLSfXvV86MbuC6UvNQXwrnj23hLUE4VbVK';
+const RPC = process.env.RPC_URL || 'https://devnet.octrascan.io/rpc';
+const DEPLOYER = process.env.DEPLOYER_ADDRESS || '';
+const WOCT = process.env.WOCT_ADDRESS || '';
+const POOL = process.env.POOL_ADDRESS || '';
+const OES = process.env.OES_ADDRESS || '';
 
 async function rpc(method, params) {
   const res = await fetch(RPC, {

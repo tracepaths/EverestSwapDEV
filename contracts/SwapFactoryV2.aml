@@ -16,14 +16,22 @@ contract SwapFactoryV2 {
     pending_setter: address
     paused: bool
     trusted_removed: map[address]bool
+    // [SECURITY] Track position of each trusted token in the list for O(1) swap-pop on remove
+    // Value is 0-based index in trusted_list; absent (default 0) means not in list
+    // (collision with legitimate index 0 is avoided by storing position+1)
+    trusted_position: map[address]int
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
+  // [SECURITY] H-4: PoolRemoved event for indexer awareness on update_pool
+  event PoolRemoved(token_a: address, token_b: address, old_pool: address, new_pool: address)
   event TrustedTokenAdded(token: address)
   event TrustedTokenRemoved(token: address)
   event SetterTransferInitiated(current: address, pending: address)
   event SetterTransferred(old_setter: address, new_setter: address)
   event Paused(status: bool)
+  // [SECURITY] Event for fee_to changes
+  event FeeToChanged(old_fee_to: address, new_fee_to: address)
 
   constructor() {
     self.fee_to_setter = origin
@@ -75,7 +83,10 @@ contract SwapFactoryV2 {
     require(caller == self.fee_to_setter, "not authorized")
     assert_address(_fee_to)
     require(_fee_to != "", "zero address")
+    let old_fee_to = self.fee_to
     self.fee_to = _fee_to
+    // [SECURITY] Emit event for transparency
+    emit FeeToChanged(old_fee_to, _fee_to)
     return true
   }
 
@@ -102,21 +113,46 @@ contract SwapFactoryV2 {
   fn add_trusted_token(token: address): bool {
     require(caller == self.fee_to_setter, "not authorized")
     assert_address(token)
+    // [SECURITY] H-3: Explicit zero-address check for clarity
+    require(token != "", "zero token address")
     require(!self.trusted_tokens[token], "already trusted")
     self.trusted_tokens[token] = true
-    if !self.trusted_removed[token] {
-      self.trusted_list.push(token)
-    }
     self.trusted_removed[token] = false
+    // [SECURITY] Only push to list if not already present (avoids duplicates)
+    // trusted_position[token] == 0 means not in list (we store position+1)
+    if self.trusted_position[token] == 0 {
+      self.trusted_list.push(token)
+      self.trusted_position[token] = len(self.trusted_list)
+    }
     emit TrustedTokenAdded(token)
     return true
   }
 
   fn remove_trusted_token(token: address): bool {
     require(caller == self.fee_to_setter, "not authorized")
+    assert_address(token)
+    // [SECURITY] H-3: Explicit zero-address check for clarity
+    require(token != "", "zero token address")
     require(self.trusted_tokens[token], "not trusted")
     self.trusted_tokens[token] = false
     self.trusted_removed[token] = true
+    // [SECURITY] Remove from list using swap-pop to keep list consistent with is_trusted
+    // The position is stored as (1-based) in trusted_position[token]
+    let pos = self.trusted_position[token]
+    if pos > 0 {
+      // Convert to 0-based index
+      let idx = pos - 1
+      let last_idx = len(self.trusted_list) - 1
+      if idx != last_idx {
+        // Swap with last element
+        let last_token = self.trusted_list[last_idx]
+        self.trusted_list[idx] = last_token
+        self.trusted_position[last_token] = idx + 1
+      }
+      // Pop the last element
+      self.trusted_list.pop()
+      self.trusted_position[token] = 0
+    }
     emit TrustedTokenRemoved(token)
     return true
   }
@@ -124,22 +160,55 @@ contract SwapFactoryV2 {
   fn update_pool(token_a: address, token_b: address, pool: address): bool {
     require(!self.paused, "factory paused")
     require(caller == self.fee_to_setter, "not authorized")
+    // [SECURITY] Full validation: zero addresses, identical tokens
     require(pool != "", "zero pool address")
+    require(token_a != token_b, "identical tokens")
     assert_address(pool)
+    assert_address(token_a)
+    assert_address(token_b)
+    require(self.pool_token_pair[pool] == "" || self.pool_token_pair[pool] == "0", "pool already registered")
 
     let old_pool = self.pools_by_pair[token_a][token_b]
     if old_pool == "" || old_pool == "0" {
       old_pool = self.pools_by_pair[token_b][token_a]
     }
     require(old_pool != "" && old_pool != "0", "no existing pool for pair")
+    require(pool != old_pool, "pool unchanged")
 
     self.pools_by_pair[token_a][token_b] = pool
     self.pools_by_pair[token_b][token_a] = pool
     self.pool_token_pair[pool] = token_a
     self.pool_token_b_map[pool] = token_b
+    // [SECURITY] Clear old pool metadata to avoid state inconsistency
+    self.pool_token_pair[old_pool] = ""
+    self.pool_token_b_map[old_pool] = ""
+    // [SECURITY] M-3: Remove old pool from the `pools` list to avoid stale entries
+    // in `all_pools()`. Iterate the list, find the old pool, swap-pop it.
+    let i = 0
+    let found = false
+    while i < len(self.pools) {
+      if self.pools[i] == old_pool {
+        let last_idx = len(self.pools) - 1
+        if i != last_idx {
+          let last_pool = self.pools[last_idx]
+          self.pools[i] = last_pool
+        }
+        self.pools.pop()
+        found = true
+      }
+      i += 1
+    }
+    // Decrement pool_count since we removed one
+    if found {
+      self.pool_count = self.pool_count - 1
+    }
     self.pools.push(pool)
     let pool_id = self.pool_count
     self.pool_count = pool_id + 1
+    // [SECURITY] H-4: Emit PoolRemoved event for the old pool (so indexers can track
+    // pool replacements) followed by PoolCreated for the new one.
+    emit PoolRemoved(token_a, token_b, old_pool, pool)
+    emit PoolCreated(token_a, token_b, pool, pool_id)
     return true
   }
 

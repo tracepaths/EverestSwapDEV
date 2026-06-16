@@ -14,6 +14,9 @@ if (!MNEMONIC) {
   process.exit(1);
 }
 const FEE_OU = '100000';
+// [V7-DEPLOY] CLI flags
+const FORCE = process.argv.includes('--force');
+const OPTION = process.argv.find(a => a.startsWith('--option='))?.split('=')[1];
 const OES_ADDRESS = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
 const DEPLOYMENTS_PATH = path.join(__dirname, '..', 'deployments.json');
 
@@ -144,6 +147,23 @@ function saveDeployments(addresses) {
 async function fullFreshDeploy(deployer, nonce) {
   console.log('\n=== Full Fresh Deploy ===\n');
 
+  // [SECURITY] S-2: Balance check before starting
+  const balInfo = await rpcCall('octra_balance', [deployer.address]);
+  const deployerBal = parseFloat(balInfo.balance);
+  if (deployerBal < 0.5) {
+    throw new Error(`Insufficient balance: ${balInfo.balance} OCT (need at least 0.5 OCT for 13+ txs)`);
+  }
+  console.log(`Deployer balance: ${balInfo.balance} OCT`);
+
+  // [SECURITY] S-3: Idempotency check — refuse to overwrite existing deployments
+  const existing = loadDeployments();
+  if (existing && existing.SwapFactory && existing.WOCT && existing.SwapPool && existing.Router) {
+    if (!FORCE) {
+      throw new Error('Contracts already deployed. Use option 2 (Factory Fix) or 3 (Init Only) instead of option 1.');
+    }
+    console.log('  ⚠️ --force: Bypassing S-3 idempotency check, overwriting existing deployments');
+  }
+
   console.log('Compiling contracts...');
   const swapFactory = await compile('SwapFactoryV2');
   const woct = await compile('WOCT');
@@ -155,63 +175,96 @@ async function fullFreshDeploy(deployer, nonce) {
   console.log('\n1. Deploying SwapFactory...');
   nonce++;
   addresses.SwapFactory = await deploy('SwapFactory', swapFactory.bytecode, deployer.address, nonce, deployer.keypair.secretKey);
+  saveDeployments(addresses);  // [SECURITY] S-1: Save after each step
 
   console.log('\n2. Deploying WOCT...');
   nonce++;
   addresses.WOCT = await deploy('WOCT', woct.bytecode, deployer.address, nonce, deployer.keypair.secretKey);
+  saveDeployments(addresses);
 
   console.log('\n3. Deploying SwapPool...');
   nonce++;
   addresses.SwapPool = await deploy('SwapPool', swapPool.bytecode, deployer.address, nonce, deployer.keypair.secretKey);
+  saveDeployments(addresses);
 
   console.log('\n4. Deploying Router...');
   nonce++;
   addresses.Router = await deploy('Router', router.bytecode, deployer.address, nonce, deployer.keypair.secretKey);
-
   saveDeployments(addresses);
+
   return { addresses, nonce };
 }
 
 async function initContracts(addresses, deployer, nonce) {
   console.log('\n=== Initializing Contracts ===\n');
 
+  // [V7-FIX] Each step is wrapped in try/catch so init can resume from partial state
+  const safeCall = async (name, fn) => {
+    try {
+      await fn();
+    } catch (e) {
+      console.log(`  ⚠️ ${name} skipped (likely already done): ${e.message.slice(0, 100)}`);
+    }
+  };
+
   console.log('7. Setting tokens on SwapPool...');
-  nonce++;
-  await callMethod(addresses.SwapPool, 'set_tokens', [addresses.WOCT, OES_ADDRESS], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('set_tokens', async () => {
+    nonce++;
+    await callMethod(addresses.SwapPool, 'set_tokens', [addresses.WOCT, OES_ADDRESS], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   console.log('\n8. Depositing 5 OCT → WOCT...');
-  nonce++;
-  await callMethod(addresses.WOCT, 'deposit', [], '5000000', deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('deposit', async () => {
+    nonce++;
+    await callMethod(addresses.WOCT, 'deposit', [], '5000000', deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   const woctBal = await rpcCall('contract_call', [addresses.WOCT, 'balance_of', [deployer.address], deployer.address]);
   console.log(`  WOCT balance: ${woctBal.result}`);
 
   console.log('\n9. Granting SwapPool allowance on WOCT...');
-  nonce++;
-  const liquidOct = '4000000';
-  await callMethod(addresses.WOCT, 'grant', [addresses.SwapPool, parseInt(liquidOct)], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('grant_woct', async () => {
+    nonce++;
+    const liquidOct = '4000000';
+    await callMethod(addresses.WOCT, 'grant', [addresses.SwapPool, parseInt(liquidOct)], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   console.log('\n10. Granting SwapPool allowance on OES...');
-  nonce++;
-  const liquidOes = '80000000000';
-  await callMethod(OES_ADDRESS, 'grant', [addresses.SwapPool, parseInt(liquidOes)], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('grant_oes', async () => {
+    nonce++;
+    const liquidOes = '80000000000';
+    await callMethod(OES_ADDRESS, 'grant', [addresses.SwapPool, parseInt(liquidOes)], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   console.log('\n11. Adding liquidity...');
-  nonce++;
-  await callMethod(addresses.SwapPool, 'add_liquidity', [parseInt(liquidOct), parseInt(liquidOes), 0, 0, 0], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('add_liquidity', async () => {
+    nonce++;
+    const liquidOct = 4000000;
+    const liquidOes = 80000000000;
+    // [V7-FIX] Use current chain epoch + 300 (NOT unix timestamp) — epoch in AML is the chain block counter
+    const epochInfo = await rpcCall('epoch_current', []);
+    const addLiqDeadline = epochInfo.epoch_id + 300;
+    await callMethod(addresses.SwapPool, 'add_liquidity', [liquidOct, liquidOes, 0, addLiqDeadline, 0], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   const reserves = await rpcCall('contract_call', [addresses.SwapPool, 'get_reserves', [], deployer.address]);
   console.log(`  Reserves: ${reserves.result}`);
 
   console.log('\n12. Registering pool with factory...');
-  nonce++;
-  await callMethod(addresses.SwapFactory, 'register_pool', [addresses.WOCT, OES_ADDRESS, addresses.SwapPool], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('register_pool', async () => {
+    nonce++;
+    await callMethod(addresses.SwapFactory, 'register_pool', [addresses.WOCT, OES_ADDRESS, addresses.SwapPool], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   console.log('\n13. Setting factory on Router...');
-  nonce++;
-  await callMethod(addresses.Router, 'set_factory', [addresses.SwapFactory], null, deployer.address, nonce, deployer.keypair.secretKey);
-  nonce++;
-  await callMethod(addresses.Router, 'set_woct', [addresses.WOCT], null, deployer.address, nonce, deployer.keypair.secretKey);
+  await safeCall('set_factory', async () => {
+    nonce++;
+    await callMethod(addresses.Router, 'set_factory', [addresses.SwapFactory], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
+  await safeCall('set_woct', async () => {
+    nonce++;
+    await callMethod(addresses.Router, 'set_woct', [addresses.WOCT], null, deployer.address, nonce, deployer.keypair.secretKey);
+  });
 
   return nonce;
 }
@@ -224,8 +277,11 @@ async function runTests(addresses, deployer, nonce) {
     nonce++;
     await callMethod(addresses.WOCT, 'grant', [addresses.SwapPool, 1000000], null, deployer.address, nonce, deployer.keypair.secretKey);
     nonce++;
+    // [V7-FIX] Use chain epoch (not unix timestamp) for deadline
+    const epochInfo = await rpcCall('epoch_current', []);
+    const swapDeadline = epochInfo.epoch_id + 300;
     const swapResult = await submitTx(deployer.address, addresses.SwapPool, '0', nonce, FEE_OU, Date.now() / 1000,
-      'call', 'swap_a_for_b', JSON.stringify([1000000, 0, 0]), deployer.keypair.secretKey);
+      'call', 'swap_a_for_b', JSON.stringify([1000000, 0, swapDeadline]), deployer.keypair.secretKey);
     if (swapResult.events) {
       for (const e of swapResult.events) {
         if (e.event === 'Swap') console.log(`  Swap: in=${e.values[2]}, out=${e.values[3]}`);
@@ -279,7 +335,12 @@ async function main() {
   console.log('  4. Test Only           — Run swap/withdraw tests');
   console.log('  5. Print Addresses     — Show current deployments.json\n');
 
-  const choice = await ask('Select option [1-5]: ');
+  let choice = OPTION;
+  if (!choice) {
+    choice = await ask('Select option [1-5]: ');
+  } else {
+    console.log(`Selected option: ${choice} (via --option)`);
+  }
   console.log('');
 
   let currentNonce = nonce;

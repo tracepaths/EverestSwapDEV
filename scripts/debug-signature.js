@@ -11,17 +11,6 @@ if (!MNEMONIC) {
   process.exit(1);
 }
 
-async function rpcCall(method, params) {
-  const res = await fetch(RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error('RPC error: ' + data.error.message);
-  return data.result;
-}
-
 function jsonEscape(s) {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -41,7 +30,11 @@ function canonicalTxJson(tx) {
 }
 
 async function main() {
-  // Get deployer key
+  // [V7-SECURITY-FIX CRIT-3] Pure off-chain signature-format debugging tool.
+  // This script MUST NOT submit any transaction. It only computes and prints
+  // signatures so the developer can compare with their wallet's signed payload.
+
+  // Derive deployer key
   const seed64 = crypto.pbkdf2Sync(MNEMONIC, 'mnemonic', 2048, 64, 'sha512');
   const hmac = crypto.createHmac('sha512', 'Octra seed');
   hmac.update(Buffer.from(seed64));
@@ -94,48 +87,11 @@ async function main() {
   const callSig = nacl.sign.detached(Buffer.from(callJson, 'utf-8'), keypair.secretKey);
   console.log('Signature (b64):', Buffer.from(callSig).toString('base64'));
 
-  // Test 3: Submit a simple call to verify
-  console.log('\n--- Test 3: Submit a get_reserves view call ---');
-  try {
-    const viewResult = await rpcCall('contract_call', ['octEXsVBKK182zNf58Q26R6jKKA4NMQeMoMLUF37Mk94BBu', 'get_reserves', [], deployerAddr]);
-    console.log('View call result:', viewResult);
-  } catch (e) {
-    console.log('View call error:', e.message);
-  }
-
-  // Test 4: Try submitting a simple contract call (no message with quotes)
-  console.log('\n--- Test 4: Submit simple contract call ---');
-  const bal = await rpcCall('octra_balance', [deployerAddr]);
-  let nonce = bal.nonce;
-  console.log('Current nonce:', nonce);
-
-  const simpleTx = {
-    from: deployerAddr,
-    to_: 'octEXsVBKK182zNf58Q26R6jKKA4NMQeMoMLUF37Mk94BBu',
-    amount: '0',
-    nonce: nonce + 1,
-    ou: '100000',
-    timestamp: Date.now() / 1000,
-    op_type: 'call',
-    encrypted_data: 'set_tokens',
-    message: JSON.stringify(['oct00000000000000000000000000000000000000000000', 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD'])
-  };
-  const simpleJson = canonicalTxJson(simpleTx);
-  console.log('Canonical JSON:', simpleJson);
-  const simpleSig = nacl.sign.detached(Buffer.from(simpleJson, 'utf-8'), keypair.secretKey);
-  simpleTx.signature = Buffer.from(simpleSig).toString('base64');
-  simpleTx.public_key = Buffer.from(keypair.secretKey.slice(32, 64)).toString('base64');
-  console.log('Full tx:', JSON.stringify(simpleTx, null, 2));
-
-  try {
-    const result = await rpcCall('octra_submit', [simpleTx]);
-    console.log('Submit result:', result);
-    if (result.tx_hash) {
-      console.log('Tx submitted! Hash:', result.tx_hash);
-    }
-  } catch (e) {
-    console.log('Submit error:', e.message);
-  }
+  // [SECURITY] Test 3 (live contract view call) and Test 4 (live tx submission) intentionally
+  // removed to prevent accidental on-chain side effects during debugging.
+  // To inspect on-chain state, use contract_view() from walletService.ts or a read-only
+  // explorer. To sign and submit, use deploy.js or PoolPage.tsx.
+  console.log('\n[SECURITY] No on-chain calls performed. This is a pure signature debugger.');
 }
 
 main().catch(err => console.error('Error:', err));

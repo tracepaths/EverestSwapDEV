@@ -16,12 +16,12 @@ const CONTRACTS_DIR = path.join(__dirname, '..', 'contracts');
 const DEPLOY_FEE_OU = '100000';
 const CALL_FEE_OU = '1500';
 
-// Known devnet addresses
-const WOCT = 'oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe';
-const OES = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+// [SECURITY] Load addresses from deployments.json; fall back to canonical OES only
+const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deployments.json'), 'utf-8'));
+const WOCT = deployments.WOCT;
+const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
 
 // Will be set after deploying V2 factory
-const EXISTING_FACTORY_V1 = 'octEwgKA8zRxriLdvdrTuKNeimvHTSLqt6sX6KBCUTyQfxs';
 let FACTORY_V2 = ''; // will be set after deploy
 
 async function rpcCall(method, params) {

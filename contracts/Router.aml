@@ -18,6 +18,8 @@ contract Router {
   // [V7-CRIT-8] Two-step ownership events
   event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
   event OwnershipTransferred(old_owner: address, new_owner: address)
+  // [SECURITY] M-9: Event for max slippage updates
+  event MaxSlippageBpsSet(old_bps: int, new_bps: int)
 
   constructor() {
     self.factory = origin
@@ -78,8 +80,13 @@ contract Router {
   // [AUDIT-FIX NEW-35] Set max slippage (in bps)
   fn set_max_slippage_bps(bps: int): bool {
     require(caller == self.owner, "not authorized")
-    require(bps > 0 && bps <= 9999, "invalid slippage bps")
+    // [SECURITY] M-9: Lower max from 9999 (99.99%) to 3000 (30%) — high slippage is
+    // dangerous and should be reserved for emergency recovery
+    require(bps > 0 && bps <= 3000, "invalid slippage bps (max 30%)")
+    let old_bps = self.max_slippage_bps
     self.max_slippage_bps = bps
+    // [SECURITY] M-9: Emit event for transparency
+    emit MaxSlippageBpsSet(old_bps, bps)
     return true
   }
 
@@ -99,12 +106,17 @@ contract Router {
     require(min_out > 0, "min_out must be positive")
     // [AUDIT-FIX NEW-38] Validasi recipient tidak zero address
     require(to != "", "recipient is zero address")
+    // [SECURITY] R-1: Reject token_in/token_out being the router itself
+    require(token_in != self_addr && token_out != self_addr, "token cannot be router")
 
     let factory_addr = self.factory
 
     // Dapatkan pool address dari factory (bidirectional lookup)
     let pool_addr = call(factory_addr, "get_pool", [token_in, token_out])
     require(pool_addr != "", "no pool found")
+    // [SECURITY] R-2/H-5: Reject recipient being the pool or factory to prevent stuck funds
+    require(to != pool_addr, "recipient cannot be pool")
+    require(to != factory_addr, "recipient cannot be factory")
 
     // [V7-CRIT-6] Validasi pool pair match requested tokens
     let pool_token_a = call(pool_addr, "get_token_a", [])
@@ -119,8 +131,15 @@ contract Router {
     // Querying get_amount_out from the pool gives the correct current exchange rate,
     // avoiding the broken 1:1 price assumption which blocked non-1:1 swaps (e.g. OES/WOCT).
     let expected_out = call(pool_addr, "get_amount_out", [amount_in, is_a_to_b])
+    // [SECURITY] Reject malicious or broken pools that return 0 from get_amount_out
+    // This prevents bypassing the global slippage check via zero output
+    require(expected_out > 0, "pool returned zero output")
     let max_allowed_loss_bps = self.max_slippage_bps
-    let min_out_floor = expected_out * (10000 - max_allowed_loss_bps) / 10000
+    // [SECURITY] M-1: Use ceiling division to prevent rounding bypass. Without this,
+    // a small `expected_out` (e.g., 1-99) would round `min_out_floor` to 0, silently
+    // bypassing the global slippage check.
+    let min_out_floor = (expected_out * (10000 - max_allowed_loss_bps) + 9999) / 10000
+    // [SECURITY] Always enforce the floor when expected_out > 0
     if min_out_floor > 0 {
       require(min_out >= min_out_floor, "min_out below global max slippage threshold")
     }
@@ -129,14 +148,14 @@ contract Router {
     let balance_before = call(token_in, "balance_of", [self_addr])
 
     // Pull token dari caller ke router
-    call(token_in, "pull", [caller, self_addr, amount_in])
+    require(call(token_in, "pull", [caller, self_addr, amount_in]), "token pull failed")
 
     // [V2-HIGH-8] Verify tokens were actually received by the router
     let balance_after = call(token_in, "balance_of", [self_addr])
     require(balance_after >= balance_before + amount_in, "token pull did not increase router balance (possible malicious token)")
 
     // Grant token_in ke pool
-    call(token_in, "grant", [pool_addr, amount_in])
+    require(call(token_in, "grant", [pool_addr, amount_in]), "token grant failed")
 
     let amount_out = 0
 
@@ -153,12 +172,12 @@ contract Router {
     require(amount_out > 0, "zero output")
 
     // [V2-MED-6] Transfer output tokens to recipient.
+    // [SECURITY] H-6: Reject recipient == self_addr instead of silently redirecting
+    // to the caller. Silent redirect could be used by integrating contracts to lose
+    // output tokens to the wrong address.
+    require(to != self_addr, "recipient cannot be router")
     let recipient = to
-    if recipient == self_addr {
-      // If someone mistakenly sets `to` to the router itself, redirect to the original caller
-      recipient = caller
-    }
-    call(token_out, "transfer", [recipient, amount_out])
+    require(call(token_out, "transfer", [recipient, amount_out]), "output transfer failed")
 
     emit SwapExact(caller, token_in, token_out, amount_in, amount_out)
     return amount_out

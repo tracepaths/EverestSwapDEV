@@ -112,17 +112,10 @@ function saveDeployments(addresses) {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  let mnemonic = null;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--mnemonic' && args[i + 1]) {
-      mnemonic = args[i + 1];
-      i++;
-    }
-  }
-
+  // [SECURITY] Load MNEMONIC from environment variable - NOT from CLI args
+  const mnemonic = process.env.MNEMONIC;
   if (!mnemonic) {
-    console.error('Usage: node redeploy-factory.js --mnemonic "<mnemonic>"');
+    console.error('Usage: MNEMONIC="your mnemonic phrase" node redeploy-factory.js');
     process.exit(1);
   }
 
