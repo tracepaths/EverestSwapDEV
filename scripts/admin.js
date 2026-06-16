@@ -11,14 +11,22 @@ const DEPLOYMENTS_PATH = path.join(__dirname, '..', 'deployments.json');
 // ── RPC Helpers ──────────────────────────────────────────────
 
 async function rpcCall(method, params) {
-  const res = await fetch(RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error('RPC error: ' + data.error.message);
-  return data.result;
+  // [V7-FIX] Add 30s timeout to avoid hanging on RPC issues
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: controller.signal
+    });
+    const data = await res.json();
+    if (data.error) throw new Error('RPC error: ' + data.error.message);
+    return data.result;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function contractView(addr, method, params = [], caller = '') {
