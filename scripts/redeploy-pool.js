@@ -204,9 +204,12 @@ async function main() {
     await callMethod(oldTokenB, 'grant', [newPoolAddr, parseInt(reserveB)], null, deployerAddr, nonce, keypair.secretKey);
 
     // Add initial liquidity with lock_duration=0 (unlocked)
+    // [V7-FIX] Use chain epoch for deadline (not unix timestamp)
     console.log('  Adding liquidity...');
     nonce++;
-    await callMethod(newPoolAddr, 'add_liquidity', [parseInt(reserveA), parseInt(reserveB), 1, 0, 0], null, deployerAddr, nonce, keypair.secretKey);
+    const epochInfo1 = await rpcCall('epoch_current', []);
+    const addLiqDeadline = (epochInfo1?.epoch_id || 0) + 300;
+    await callMethod(newPoolAddr, 'add_liquidity', [parseInt(reserveA), parseInt(reserveB), 1, addLiqDeadline, 0], null, deployerAddr, nonce, keypair.secretKey);
 
     const newReserves = await rpcCall('contract_call', [newPoolAddr, 'get_reserves', [], deployerAddr]);
     console.log(`  New reserves: ${newReserves.result}`);

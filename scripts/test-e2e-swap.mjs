@@ -129,10 +129,13 @@ const allowance = await rpc('contract_call', [WOCT, 'allowance', [DEPLOYER, POOL
 console.log('WOCT allowance to pool:', allowance.result || allowance);
 
 // Step 1: Execute SWAP - 0.5 WOCT → OES
+// [V7-FIX] Use chain epoch for deadline (not unix timestamp)
 console.log('\n=== Step 1: Swap 0.5 WOCT for OES ===');
 const swapAmount = '500000'; // 0.5 WOCT
 const minOut = '1'; // minimum OES to receive
-const swapResult = await submitCall(DEPLOYER, POOL, '0', nonce++, '100000', 'swap_a_for_b', [swapAmount, minOut, '0'], keypair, pubKeyB64);
+const epochInfoSwap = await rpc('epoch_current', []);
+const swapDeadline = (epochInfoSwap?.epoch_id || 0) + 300;
+const swapResult = await submitCall(DEPLOYER, POOL, '0', nonce++, '100000', 'swap_a_for_b', [swapAmount, minOut, String(swapDeadline)], keypair, pubKeyB64);
 console.log('Swap submitted:', JSON.stringify(swapResult));
 const swapHash = swapResult.tx_hash;
 
