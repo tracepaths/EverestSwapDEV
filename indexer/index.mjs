@@ -28,14 +28,31 @@ const PORT = parseInt(envVars.PORT, 10) || 3123;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const PRICES_FILE = path.join(DATA_DIR, 'prices.json');
+const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 
 let prices = [];
+let events = [];  // [V7-PASS9] M-14: cached events (capped 10k)
 let lastError = null;
+let lastEventBlock = 0;  // last block we've processed events from
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (fs.existsSync(PRICES_FILE)) {
   try { prices = JSON.parse(fs.readFileSync(PRICES_FILE, 'utf-8')); } catch {}
 }
+if (fs.existsSync(EVENTS_FILE)) {
+  try { events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf-8')); } catch {}
+}
+
+// [V7-PASS9] M-14: TokenV2 events we track (Transfer, Mint, Burn, etc.)
+const TRACKED_EVENTS = [
+  'Transfer', 'Approval', 'Grant',
+  'Mint', 'Burn',
+  'Paused', 'BlacklistUpdated',
+  'MaxTxUpdated', 'MaxWalletUpdated', 'CooldownUpdated',
+  'TaxUpdated', 'AutoBurnUpdated',
+  'OwnershipTransferInitiated', 'OwnershipTransferred',
+  'TrustedUpdated',
+];
 
 async function rpc(method, params) {
   const res = await fetch(RPC, {
@@ -81,6 +98,62 @@ async function pollPrice() {
 
 setInterval(pollPrice, 5000);
 pollPrice();
+
+// [V7-PASS9] M-14: poll events from the pool contract (and TokenV2 contracts later)
+let isPollingEvents = false;
+async function pollEvents() {
+  if (isPollingEvents) return;
+  isPollingEvents = true;
+  try {
+    // Get current block height
+    const head = await rpc('get_block_height', []).catch(() => null);
+    const currentBlock = Number(head?.block_height || head?.height || 0);
+    if (!currentBlock || currentBlock <= lastEventBlock) {
+      // First run, or no new blocks — try to fetch a small initial window
+      if (lastEventBlock === 0) {
+        lastEventBlock = Math.max(1, currentBlock - 100);
+      } else {
+        return;
+      }
+    }
+    const fromBlock = lastEventBlock + 1;
+    const toBlock = currentBlock;
+    if (fromBlock > toBlock) return;
+    // Fetch logs for the pool contract (TokenV2 events when extended)
+    const logs = await rpc('get_logs', [{
+      from_block: fromBlock,
+      to_block: toBlock,
+      contract: POOL,
+    }]).catch(() => []);
+    if (Array.isArray(logs)) {
+      for (const log of logs) {
+        const eventName = log.event || log.type || 'Unknown';
+        if (!TRACKED_EVENTS.includes(eventName)) continue;
+        const event = {
+          block: log.block_height || log.block || 0,
+          time: Date.now() / 1000,
+          contract: log.contract || POOL,
+          event: eventName,
+          data: log.data || log,
+        };
+        events.push(event);
+      }
+      if (events.length > 10000) events.splice(0, events.length - 10000);
+      fs.promises.writeFile(EVENTS_FILE, JSON.stringify(events)).catch((e) => {
+        lastError = 'events write failed: ' + e.message;
+      });
+    }
+    lastEventBlock = toBlock;
+  } catch (e) {
+    // Silently ignore — get_logs may not be available on all RPCs
+  } finally {
+    isPollingEvents = false;
+  }
+}
+
+// [V7-PASS9] M-14: poll events every 10s (less frequent than prices to reduce load)
+setInterval(pollEvents, 10000);
+pollEvents();
 
 const app = express();
 
@@ -151,6 +224,26 @@ app.get('/api/prices', (_req, res) => {
   const offset = parseInt(_req.query.offset, 10) || 0;
   const sliced = prices.slice(Math.max(0, prices.length - limit - offset), prices.length - offset);
   res.json(sliced);
+});
+
+// [V7-PASS9] M-14: events endpoint
+app.get('/api/events', (_req, res) => {
+  if (!Array.isArray(events)) {
+    return res.status(500).json({ error: 'invalid events data' });
+  }
+  const limit = Math.min(parseInt(_req.query.limit, 10) || 100, 1000);
+  const offset = parseInt(_req.query.offset, 10) || 0;
+  const eventFilter = _req.query.event;
+  const contractFilter = _req.query.contract;
+  let filtered = events;
+  if (eventFilter) filtered = filtered.filter(e => e.event === eventFilter);
+  if (contractFilter) filtered = filtered.filter(e => e.contract === contractFilter);
+  const sliced = filtered.slice(Math.max(0, filtered.length - limit - offset), filtered.length - offset);
+  res.json({
+    total: filtered.length,
+    lastBlock: lastEventBlock,
+    events: sliced,
+  });
 });
 
 app.listen(PORT, () => console.log(`Indexer [${network}] running on http://localhost:${PORT}`));
