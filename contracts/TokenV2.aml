@@ -1,4 +1,4 @@
-// [V7-FIX] TokenV2.aml - Full-feature ERC20 token with 20lab-style options
+// [V7-FIX] TokenV2.aml - Full-feature fungible token
 // Replaces Token.aml. Supports: mintable, burnable, pausable, blacklist,
 // max-tx, max-wallet, cooldown, tax, auto-burn, reflection.
 //
