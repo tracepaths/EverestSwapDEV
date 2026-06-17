@@ -5,6 +5,35 @@ import express from 'express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// [V7-PASS10] HIGH-5: PID file to prevent multi-instance corruption
+const PID_FILE = path.join(__dirname, 'data', 'indexer.pid');
+try {
+  if (fs.existsSync(PID_FILE)) {
+    const oldPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+    if (oldPid && oldPid !== process.pid) {
+      try {
+        process.kill(oldPid, 0);  // throws if process is dead
+        console.error(`[indexer] Another instance is already running (pid ${oldPid}). Exiting.`);
+        process.exit(1);
+      } catch {
+        // old PID is dead, safe to overwrite
+      }
+    }
+  }
+  fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
+  fs.writeFileSync(PID_FILE, String(process.pid));
+  // Clean up on exit
+  const cleanup = () => {
+    try { fs.unlinkSync(PID_FILE); } catch { /* noop */ }
+  };
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => { cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  console.log(`[indexer] PID ${process.pid} registered in ${PID_FILE}`);
+} catch (e) {
+  console.error(`[indexer] Failed to write PID file: ${e.message}`);
+}
+
 const network = process.env.NETWORK || process.argv.find(a => a.startsWith('--network='))?.split('=')[1] || 'devnet';
 const envFile = path.join(__dirname, `env.${network}`);
 
@@ -83,7 +112,7 @@ async function pollPrice() {
     }
     const entry = { time: Date.now() / 1000, price };
     prices.push(entry);
-    if (prices.length > 100000) prices.splice(0, prices.length - 100000);
+    if (prices.length > 10000) prices.splice(0, prices.length - 10000);
     // [SECURITY] M-4: Use async file write to avoid blocking the event loop
     fs.promises.writeFile(PRICES_FILE, JSON.stringify(prices)).catch((e) => {
       lastError = 'write failed: ' + e.message;

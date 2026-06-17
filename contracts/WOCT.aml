@@ -128,8 +128,10 @@ contract WOCT {
   }
 
   // [V7-CRIT-10] Claim pending OCT withdrawal (pull pattern)
+  // [V7-PASS10] HIGH-6: removed `!self.paused` check — pending withdrawals are
+  // already segregated funds owed to the user. Pausing transfers shouldn't lock
+  // claims. Pausing affects new deposits/withdrawals, not existing claims.
   fn claim_withdrawal(): bool {
-    require(!self.paused, "contract paused")
     require(!self.locked, "reentrancy guard")
     let amount = self.pending_withdrawals[caller]
     require(amount > 0, "no pending withdrawal")
