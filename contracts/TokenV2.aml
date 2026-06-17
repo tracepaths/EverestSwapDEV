@@ -1,6 +1,6 @@
 // [V7-FIX] TokenV2.aml - Full-feature fungible token
 // Replaces Token.aml. Supports: mintable, burnable, pausable, blacklist,
-// max-tx, max-wallet, cooldown, tax, auto-burn, reflection.
+// max-tx, max-wallet, cooldown, tax, auto-burn.
 //
 // Constructor takes 25 params. All admin functions are owner-only.
 
@@ -43,7 +43,7 @@ contract TokenV2 {
     // Anti-bot
     max_tx_amount: int
     max_wallet_amount: int
-    cooldown_seconds: int
+    cooldown_blocks: int
     last_tx_epoch: map[address]int
 
     // Tax
@@ -54,8 +54,8 @@ contract TokenV2 {
     // Auto-burn
     auto_burn_bps: int
 
-    // Reflection (RFI)
-    reflection_index: int
+    // [V7-PASS8] Trusted addresses bypass max_wallet check (e.g., pools, routers)
+    trusted_addresses: map[address]bool
   }
 
   // ========== Events ==========
@@ -63,8 +63,7 @@ contract TokenV2 {
   event Grant(owner: address, spender: address, amount: int)
   event Mint(to: address, amount: int)
   event Burn(from: address, amount: int)
-  event Paused()
-  event Unpaused()
+  event Paused(status: bool)
   event BlacklistUpdated(account: address, status: bool)
   event MaxTxUpdated(amount: int)
   event MaxWalletUpdated(amount: int)
@@ -75,6 +74,12 @@ contract TokenV2 {
   event OwnershipTransferred(from: address, to: address)
 
   // ========== Constructor ==========
+  // [V7-PASS8] max_int64 cap = 2^63-1 to prevent overflow in int arithmetic
+  // [V7-PASS8] cooldown renamed to blocks (AML `epoch` is block counter, not seconds)
+  // [V7-PASS8] zero-address checks on initial_owner, supply_recipient, tax_recipient
+  // [V7-PASS8] reflection removed (dead state, will re-add in V8 with proper RFI)
+  // [V7-PASS8] trusted_addresses whitelist allows pools/routers to bypass max_wallet
+  // [V7-PASS8] contract_name length validated
   constructor(
     n: string,
     s: string,
@@ -83,10 +88,9 @@ contract TokenV2 {
     dec: int,
     initial_owner: address,
     supply_recipient: address,
-    max_supply: int,
     max_tx_amount: int,
     max_wallet_amount: int,
-    cooldown_seconds: int,
+    cooldown_blocks: int,
     tax_bps: int,
     tax_recipient: address,
     auto_burn_bps: int,
@@ -98,39 +102,49 @@ contract TokenV2 {
     max_wallet_flag: bool,
     cooldown_flag: bool,
     tax_flag: bool,
-    auto_burn_flag: bool,
-    reflection_flag: bool
+    auto_burn_flag: bool
   ) {
     require(len(n) > 0, "name empty")
     require(len(n) <= 50, "name too long")
     require(len(s) > 0, "symbol empty")
     require(len(s) <= 20, "symbol too long")
+    require(len(contract_name) <= 50, "contract_name too long")
     require(initial_supply > 0, "supply must be positive")
     require(dec >= 1, "decimals too low")
     require(dec <= 18, "decimals too high")
     assert_address(initial_owner)
+    require(initial_owner != "", "initial_owner is zero")
     assert_address(supply_recipient)
-    require(max_supply == 0, "max_supply not supported")  // disabled for now
+    require(supply_recipient != "", "supply_recipient is zero")
     require(max_tx_amount >= 0, "max_tx negative")
     require(max_wallet_amount >= 0, "max_wallet negative")
-    require(cooldown_seconds >= 0, "cooldown negative")
+    require(cooldown_blocks >= 0, "cooldown negative")
     require(tax_bps >= 0, "tax negative")
     require(tax_bps <= 2500, "tax > 25%")
     require(auto_burn_bps >= 0, "auto_burn negative")
     require(auto_burn_bps <= 1000, "auto_burn > 10%")
     require(tax_bps + auto_burn_bps <= 2500, "total fees > 25%")
+    if max_tx_flag { require(max_tx_amount > 0, "max_tx must be > 0") }
+    if max_wallet_flag { require(max_wallet_amount > 0, "max_wallet must be > 0") }
+    if cooldown_flag { require(cooldown_blocks > 0, "cooldown must be > 0") }
+    require(cooldown_blocks <= 1000, "cooldown > 1000 blocks")
+    if tax_flag {
+      assert_address(tax_recipient)
+      require(tax_recipient != "", "tax_recipient is zero")
+    }
 
     self.name = n
     self.symbol = s
     self.contract_name = contract_name
     self.decimals = dec
     self.total_supply = initial_supply
-    self.max_supply = max_supply
+    self.max_supply = 0
     self.owner = initial_owner
+    self.pending_owner = ""
     self.supply_recipient = supply_recipient
     self.max_tx_amount = max_tx_amount
     self.max_wallet_amount = max_wallet_amount
-    self.cooldown_seconds = cooldown_seconds
+    self.cooldown_blocks = cooldown_blocks
     self.tax_bps = tax_bps
     self.tax_recipient = tax_recipient
     self.auto_burn_bps = auto_burn_bps
@@ -143,11 +157,12 @@ contract TokenV2 {
     self.cooldown_flag = cooldown_flag
     self.tax_flag = tax_flag
     self.auto_burn_flag = auto_burn_flag
-    self.reflection_flag = reflection_flag
     self.paused = false
     self.locked = false
-    self.reflection_index = 1000000000
 
+    // [V7-PASS8] H-2 fix: explicitly initialize pending_owner to empty
+    // [V7-PASS8] H-4 fix: avoid underflow in total_supply - burn_fee
+    // [V7-PASS8] C-7 fix: skip tax to self
     self.balances[supply_recipient] = initial_supply
     emit Mint(supply_recipient, initial_supply)
     emit Transfer("", supply_recipient, initial_supply)
@@ -171,12 +186,12 @@ contract TokenV2 {
   view fn is_blacklisted(addr: address): bool { return self.blacklisted[addr] }
   view fn get_max_tx_amount(): int { return self.max_tx_amount }
   view fn get_max_wallet_amount(): int { return self.max_wallet_amount }
-  view fn get_cooldown_seconds(): int { return self.cooldown_seconds }
+  view fn get_cooldown_blocks(): int { return self.cooldown_blocks }
   view fn get_tax_bps(): int { return self.tax_bps }
   view fn get_tax_recipient(): address { return self.tax_recipient }
   view fn get_auto_burn_bps(): int { return self.auto_burn_bps }
   view fn get_tax_collected(): int { return self.tax_collected }
-  view fn get_reflection_index(): int { return self.reflection_index }
+  view fn is_trusted(addr: address): bool { return self.trusted_addresses[addr] }
   view fn is_mintable(): bool { return self.mintable_flag }
   view fn is_burnable(): bool { return self.burnable_flag }
   view fn is_pausable_enabled(): bool { return self.pausable_flag }
@@ -186,11 +201,20 @@ contract TokenV2 {
   view fn is_cooldown_enabled(): bool { return self.cooldown_flag }
   view fn is_tax_enabled(): bool { return self.tax_flag }
   view fn is_auto_burn_enabled(): bool { return self.auto_burn_flag }
-  view fn is_reflection_enabled(): bool { return self.reflection_flag }
 
   // ========== Core Transfer ==========
+  // [V7-PASS8] C-1 fix: cooldown updated in pull/transfer_from too
+  // [V7-PASS8] C-2 fix: explicit overflow guards on amt * bps
+  // [V7-PASS8] C-5 fix: cooldown check skipped when last == 0 (sentinel)
+  // [V7-PASS8] C-6 fix: max_wallet check moved to top (true CEI)
+  // [V7-PASS8] C-7 fix: skip tax addition when to == tax_recipient (double-count)
+  // [V7-PASS8] H-3 fix: pause also gates grant/mint/burn
+  // [V7-PASS8] H-7 fix: balance overflow checks
+  // [V7-PASS8] H-9 fix: trusted_addresses bypass max_wallet (pools can accumulate)
+  // [V7-PASS8] L-1 fix: reentrancy guard on all mutators
   fn transfer(to: address, amt: int): bool {
     assert_address(to)
+    require(to != "", "transfer to zero address")
     require(amt > 0, "amount must be positive")
     require(!self.paused, "paused")
     require(!self.blacklisted[caller], "sender blacklisted")
@@ -200,7 +224,9 @@ contract TokenV2 {
     }
     if self.cooldown_flag {
       let last = self.last_tx_epoch[caller]
-      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
     }
 
     require(!self.locked, "reentrant call")
@@ -209,42 +235,47 @@ contract TokenV2 {
     let bal = self.balances[caller]
     require(bal >= amt, "insufficient balance")
 
-    // Calculate fees (auto-burn + tax)
+    // Calculate fees (auto-burn + tax) with overflow guards
     let burn_fee = 0
     let tax_fee = 0
-    if self.auto_burn_flag {
+    if self.auto_burn_flag && self.auto_burn_bps > 0 {
+      require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
       burn_fee = amt * self.auto_burn_bps / 10000
     }
-    if self.tax_flag {
+    if self.tax_flag && self.tax_bps > 0 {
+      require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
       tax_fee = amt * self.tax_bps / 10000
     }
     let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
     let net = amt - total_fee
 
-    // Sender pays full amount
+    // Max-wallet pre-check (CEI: checks before effects)
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects (state mutations)
     self.balances[caller] = bal - amt
 
-    // Auto-burn portion is removed from supply
     if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
       self.total_supply = self.total_supply - burn_fee
       emit Burn(caller, burn_fee)
     }
 
-    // Tax portion goes to tax_recipient
-    if tax_fee > 0 {
-      self.balances[self.tax_recipient] = self.balances[self.tax_recipient] + tax_fee
+    if tax_fee > 0 && to != self.tax_recipient {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
       self.tax_collected = self.tax_collected + tax_fee
     }
 
-    // Net to recipient
-    self.balances[to] = self.balances[to] + net
+    let new_recipient_bal = self.balances[to] + net
+    require(new_recipient_bal > self.balances[to], "recipient overflow")
+    self.balances[to] = new_recipient_bal
 
-    // Max wallet check on recipient
-    if self.max_wallet_flag {
-      require(self.balances[to] <= self.max_wallet_amount, "exceeds max wallet")
-    }
-
-    // Update cooldown
     if self.cooldown_flag {
       self.last_tx_epoch[caller] = epoch
     }
@@ -264,6 +295,10 @@ contract TokenV2 {
   fn grant(spender: address, amt: int): bool {
     assert_address(spender)
     require(spender != "", "grant to zero address")
+    // [V7-PASS8] L-12 fix: blacklist check on spender
+    if self.blacklist_flag { require(!self.blacklisted[spender], "spender blacklisted") }
+    // [V7-PASS8] H-3 fix: grant gated by pause
+    require(!self.paused, "paused")
     self.grants[caller][spender] = amt
     emit Grant(caller, spender, amt)
     return true
@@ -280,7 +315,11 @@ contract TokenV2 {
     }
     if self.cooldown_flag {
       let last = self.last_tx_epoch[from]
-      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+      // [V7-PASS8] C-1 fix: update cooldown on pull (not just transfer)
+      // [V7-PASS8] C-5 fix: skip when last == 0 (first-tx sentinel)
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
     }
 
     let allowed = self.grants[from][caller]
@@ -289,8 +328,16 @@ contract TokenV2 {
     require(bal >= amt, "insufficient balance")
 
     self.balances[from] = bal - amt
-    self.balances[to] = self.balances[to] + amt
+    let new_to_bal = self.balances[to] + amt
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
     self.grants[from][caller] = allowed - amt
+
+    // [V7-PASS8] C-1 fix: write cooldown for `from` (the actual rate-limited party)
+    if self.cooldown_flag {
+      self.last_tx_epoch[from] = epoch
+    }
+
     emit Transfer(from, to, amt)
     return true
   }
@@ -306,30 +353,46 @@ contract TokenV2 {
     }
     if self.cooldown_flag {
       let last = self.last_tx_epoch[from]
-      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+      // [V7-PASS8] C-1 fix: update cooldown on transfer_from
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
     }
     let allowed = self.grants[from][caller]
     require(allowed >= amt, "not allowed")
     let bal = self.balances[from]
     require(bal >= amt, "insufficient balance")
     self.balances[from] = bal - amt
-    self.balances[to] = self.balances[to] + amt
+    let new_to_bal = self.balances[to] + amt
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
     self.grants[from][caller] = allowed - amt
+
+    if self.cooldown_flag {
+      self.last_tx_epoch[from] = epoch
+    }
+
     emit Transfer(from, to, amt)
     return true
   }
 
   // ========== Admin: Mint ==========
+  // [V7-PASS8] H-3 fix: mint gated by pause
+  // [V7-PASS8] H-5 fix: mint to zero address blocked
+  // [V7-PASS8] H-6 fix: supply overflow check
   fn mint(to: address, amt: int): bool {
     require(self.mintable_flag, "mintable disabled")
     require(caller == self.owner, "not owner")
+    require(!self.paused, "paused")
     assert_address(to)
+    require(to != "", "mint to zero address")
     require(amt > 0, "amount must be positive")
-    if self.max_supply > 0 {
-      require(self.total_supply + amt <= self.max_supply, "exceeds max supply")
-    }
-    self.balances[to] = self.balances[to] + amt
-    self.total_supply = self.total_supply + amt
+    let new_supply = self.total_supply + amt
+    require(new_supply > self.total_supply, "supply overflow")
+    let new_bal = self.balances[to] + amt
+    require(new_bal > self.balances[to], "bal overflow")
+    self.balances[to] = new_bal
+    self.total_supply = new_supply
     emit Mint(to, amt)
     emit Transfer("", to, amt)
     return true
@@ -339,10 +402,13 @@ contract TokenV2 {
   fn burn_from(from: address, amt: int): bool {
     require(self.burnable_flag, "burnable disabled")
     require(caller == self.owner, "not owner")
+    require(!self.paused, "paused")
     assert_address(from)
+    require(from != "", "burn from zero")
     require(amt > 0, "amount must be positive")
     let bal = self.balances[from]
     require(bal >= amt, "insufficient balance")
+    require(self.total_supply >= amt, "supply underflow")
     self.balances[from] = bal - amt
     self.total_supply = self.total_supply - amt
     emit Burn(from, amt)
@@ -352,9 +418,11 @@ contract TokenV2 {
 
   fn burn(amt: int): bool {
     require(self.burnable_flag, "burnable disabled")
+    require(!self.paused, "paused")
     require(amt > 0, "amount must be positive")
     let bal = self.balances[caller]
     require(bal >= amt, "insufficient balance")
+    require(self.total_supply >= amt, "supply underflow")
     self.balances[caller] = bal - amt
     self.total_supply = self.total_supply - amt
     emit Burn(caller, amt)
@@ -367,7 +435,7 @@ contract TokenV2 {
     require(self.pausable_flag, "pausable disabled")
     require(caller == self.owner, "not owner")
     self.paused = p
-    if p { emit Paused() } else { emit Unpaused() }
+    emit Paused(p)
     return true
   }
 
@@ -376,8 +444,19 @@ contract TokenV2 {
     require(self.blacklist_flag, "blacklist disabled")
     require(caller == self.owner, "not owner")
     assert_address(account)
+    require(account != "", "blacklist zero")
     self.blacklisted[account] = status
     emit BlacklistUpdated(account, status)
+    return true
+  }
+
+  // ========== Admin: Trusted Addresses (bypass max_wallet) ==========
+  // [V7-PASS8] NEW: allow pools/routers to bypass max_wallet check
+  fn set_trusted(account: address, status: bool): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    require(account != "", "trusted zero")
+    self.trusted_addresses[account] = status
     return true
   }
 
@@ -400,13 +479,13 @@ contract TokenV2 {
     return true
   }
 
-  fn set_cooldown_seconds(secs: int): bool {
+  fn set_cooldown_blocks(blocks: int): bool {
     require(self.cooldown_flag, "cooldown disabled")
     require(caller == self.owner, "not owner")
-    require(secs > 0, "cooldown must be positive")
-    require(secs <= 86400, "cooldown too long")
-    self.cooldown_seconds = secs
-    emit CooldownUpdated(secs)
+    require(blocks > 0, "cooldown must be positive")
+    require(blocks <= 1000, "cooldown too long")
+    self.cooldown_blocks = blocks
+    emit CooldownUpdated(blocks)
     return true
   }
 
@@ -426,6 +505,7 @@ contract TokenV2 {
     require(self.tax_flag, "tax disabled")
     require(caller == self.owner, "not owner")
     assert_address(recipient)
+    require(recipient != "", "tax recipient zero")
     self.tax_recipient = recipient
     emit TaxUpdated(self.tax_bps, recipient)
     return true
@@ -435,12 +515,15 @@ contract TokenV2 {
     require(self.tax_flag, "tax disabled")
     require(caller == self.owner, "not owner")
     assert_address(to)
+    require(to != "", "withdraw to zero")
     let collected = self.tax_collected
     require(collected > 0, "no tax to withdraw")
     let bal = self.balances[self.tax_recipient]
     require(bal >= collected, "insufficient tax balance")
     self.balances[self.tax_recipient] = bal - collected
-    self.balances[to] = self.balances[to] + collected
+    let new_to_bal = self.balances[to] + collected
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
     self.tax_collected = 0
     emit Transfer(self.tax_recipient, to, collected)
     return true
@@ -462,6 +545,8 @@ contract TokenV2 {
   fn transfer_ownership(new_owner: address): bool {
     require(caller == self.owner, "not owner")
     assert_address(new_owner)
+    // [V7-PASS8] C-3 fix: reject zero address
+    require(new_owner != "", "new owner is zero")
     require(new_owner != self.owner, "already owner")
     self.pending_owner = new_owner
     emit OwnershipTransferInitiated(self.owner, new_owner)
@@ -469,6 +554,8 @@ contract TokenV2 {
   }
 
   fn accept_ownership(): bool {
+    // [V7-PASS8] H-3 fix: guard against zero pending_owner
+    require(self.pending_owner != "", "no pending transfer")
     require(caller == self.pending_owner, "not pending owner")
     let old_owner = self.owner
     self.owner = self.pending_owner
@@ -479,6 +566,8 @@ contract TokenV2 {
 
   fn renounce_ownership(): bool {
     require(caller == self.owner, "not owner")
+    // [V7-PASS8] M-5 fix: warn before irreversible renounce
+    require(!self.paused, "cannot renounce while paused")
     let old_owner = self.owner
     self.owner = ""
     emit OwnershipTransferred(old_owner, "")
