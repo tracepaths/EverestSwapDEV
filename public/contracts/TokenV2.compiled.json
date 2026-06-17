@@ -1,0 +1,1136 @@
+{
+  "bytecode": "T0NUQgEAnwBKBwAAAgsAAABjb25zdHJ1Y3RvcgABAAAAMAIKAAAAbmFtZSBlbXB0eQIHAAAAUmVxdWlyZQACAAAANTABAQAAADECDQAAAG5hbWUgdG9vIGxvbmcCDAAAAHN5bWJvbCBlbXB0eQACAAAAMjACDwAAAHN5bWJvbCB0b28gbG9uZwIXAAAAc3VwcGx5IG11c3QgYmUgcG9zaXRpdmUAAQAAADECEAAAAGRlY2ltYWxzIHRvbyBsb3cAAgAAADE4AhEAAABkZWNpbWFscyB0b28gaGlnaAIYAAAAbWF4X3N1cHBseSBub3Qgc3VwcG9ydGVkAg8AAABtYXhfdHggbmVnYXRpdmUCEwAAAG1heF93YWxsZXQgbmVnYXRpdmUCEQAAAGNvb2xkb3duIG5lZ2F0aXZlAgwAAAB0YXggbmVnYXRpdmUABAAAADI1MDACCQAAAHRheCA+IDI1JQISAAAAYXV0b19idXJuIG5lZ2F0aXZlAAQAAAAxMDAwAg8AAABhdXRvX2J1cm4gPiAxMCUCEAAAAHRvdGFsIGZlZXMgPiAyNSUCBAAAAG5hbWUCBgAAAHN5bWJvbAINAAAAY29udHJhY3RfbmFtZQIIAAAAZGVjaW1hbHMCDAAAAHRvdGFsX3N1cHBseQIKAAAAbWF4X3N1cHBseQIFAAAAb3duZXICEAAAAHN1cHBseV9yZWNpcGllbnQCDQAAAG1heF90eF9hbW91bnQCEQAAAG1heF93YWxsZXRfYW1vdW50AhAAAABjb29sZG93bl9zZWNvbmRzAgcAAAB0YXhfYnBzAg0AAAB0YXhfcmVjaXBpZW50Ag0AAABhdXRvX2J1cm5fYnBzAgUAAABmYWxzZQIEAAAAdHJ1ZQINAAAAbWludGFibGVfZmxhZwINAAAAYnVybmFibGVfZmxhZwINAAAAcGF1c2FibGVfZmxhZwIOAAAAYmxhY2tsaXN0X2ZsYWcCCwAAAG1heF90eF9mbGFnAg8AAABtYXhfd2FsbGV0X2ZsYWcCDQAAAGNvb2xkb3duX2ZsYWcCCAAAAHRheF9mbGFnAg4AAABhdXRvX2J1cm5fZmxhZwIPAAAAcmVmbGVjdGlvbl9mbGFnAQEAAAAwAgYAAABwYXVzZWQCBgAAAGxvY2tlZAAKAAAAMTAwMDAwMDAwMAIQAAAAcmVmbGVjdGlvbl9pbmRleAIJAAAAYmFsYW5jZXM6AgQAAABNaW50AgAAAAACCAAAAFRyYW5zZmVyAgoAAABiYWxhbmNlX29mAgkAAABhbGxvd2FuY2UCCAAAAGdldF9uYW1lAgoAAABnZXRfc3ltYm9sAhAAAABnZXRfdG90YWxfc3VwcGx5Ag4AAABnZXRfbWF4X3N1cHBseQIJAAAAZ2V0X293bmVyAhEAAABnZXRfcGVuZGluZ19vd25lcgIUAAAAZ2V0X3N1cHBseV9yZWNpcGllbnQCEQAAAGdldF9jb250cmFjdF9uYW1lAgkAAABpc19wYXVzZWQCDgAAAGlzX2JsYWNrbGlzdGVkAhEAAABnZXRfbWF4X3R4X2Ftb3VudAIVAAAAZ2V0X21heF93YWxsZXRfYW1vdW50AhQAAABnZXRfY29vbGRvd25fc2Vjb25kcwILAAAAZ2V0X3RheF9icHMCEQAAAGdldF90YXhfcmVjaXBpZW50AhEAAABnZXRfYXV0b19idXJuX2JwcwIRAAAAZ2V0X3RheF9jb2xsZWN0ZWQCFAAAAGdldF9yZWZsZWN0aW9uX2luZGV4AgsAAABpc19taW50YWJsZQILAAAAaXNfYnVybmFibGUCEwAAAGlzX3BhdXNhYmxlX2VuYWJsZWQCFAAAAGlzX2JsYWNrbGlzdF9lbmFibGVkAhEAAABpc19tYXhfdHhfZW5hYmxlZAIVAAAAaXNfbWF4X3dhbGxldF9lbmFibGVkAhMAAABpc19jb29sZG93bl9lbmFibGVkAg4AAABpc190YXhfZW5hYmxlZAIUAAAAaXNfYXV0b19idXJuX2VuYWJsZWQCFQAAAGlzX3JlZmxlY3Rpb25fZW5hYmxlZAIIAAAAdHJhbnNmZXICBQAAAGdyYW50AgQAAABwdWxsAg0AAAB0cmFuc2Zlcl9mcm9tAgQAAABtaW50AgkAAABidXJuX2Zyb20CBAAAAGJ1cm4CCgAAAHNldF9wYXVzZWQCDQAAAHNldF9ibGFja2xpc3QCEQAAAHNldF9tYXhfdHhfYW1vdW50AhUAAABzZXRfbWF4X3dhbGxldF9hbW91bnQCFAAAAHNldF9jb29sZG93bl9zZWNvbmRzAgsAAABzZXRfdGF4X2JwcwIRAAAAc2V0X3RheF9yZWNpcGllbnQCDAAAAHdpdGhkcmF3X3RheAIRAAAAc2V0X2F1dG9fYnVybl9icHMCEgAAAHRyYW5zZmVyX293bmVyc2hpcAIQAAAAYWNjZXB0X293bmVyc2hpcAISAAAAcmVub3VuY2Vfb3duZXJzaGlwAgcAAABncmFudHM6AgEAAAA6Ag0AAABwZW5kaW5nX293bmVyAgwAAABibGFja2xpc3RlZDoCDQAAAHRheF9jb2xsZWN0ZWQCFwAAAGFtb3VudCBtdXN0IGJlIHBvc2l0aXZlAhIAAABzZW5kZXIgYmxhY2tsaXN0ZWQCFQAAAHJlY2lwaWVudCBibGFja2xpc3RlZAIOAAAAZXhjZWVkcyBtYXggdHgCDgAAAGxhc3RfdHhfZXBvY2g6Ag8AAABjb29sZG93biBhY3RpdmUCDgAAAHJlZW50cmFudCBjYWxsAhQAAABpbnN1ZmZpY2llbnQgYmFsYW5jZQAFAAAAMTAwMDACBAAAAEJ1cm4CEgAAAGV4Y2VlZHMgbWF4IHdhbGxldAIVAAAAZ3JhbnQgdG8gemVybyBhZGRyZXNzAgUAAABHcmFudAIQAAAAZnJvbSBibGFja2xpc3RlZAIOAAAAdG8gYmxhY2tsaXN0ZWQCCwAAAG5vdCBhbGxvd2VkAhEAAABtaW50YWJsZSBkaXNhYmxlZAIJAAAAbm90IG93bmVyAhIAAABleGNlZWRzIG1heCBzdXBwbHkCEQAAAGJ1cm5hYmxlIGRpc2FibGVkAhEAAABwYXVzYWJsZSBkaXNhYmxlZAIIAAAAVW5wYXVzZWQCBgAAAFBhdXNlZAISAAAAYmxhY2tsaXN0IGRpc2FibGVkAhAAAABCbGFja2xpc3RVcGRhdGVkAg8AAABtYXhfdHggZGlzYWJsZWQCDAAAAE1heFR4VXBkYXRlZAITAAAAbWF4X3dhbGxldCBkaXNhYmxlZAIQAAAATWF4V2FsbGV0VXBkYXRlZAIRAAAAY29vbGRvd24gZGlzYWJsZWQCGQAAAGNvb2xkb3duIG11c3QgYmUgcG9zaXRpdmUABQAAADg2NDAwAhEAAABjb29sZG93biB0b28gbG9uZwIPAAAAQ29vbGRvd25VcGRhdGVkAgwAAAB0YXggZGlzYWJsZWQCCgAAAFRheFVwZGF0ZWQCEgAAAG5vIHRheCB0byB3aXRoZHJhdwIY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",
+  "size": 10268,
+  "instructions": 1866,
+  "abi": "{\"functions\":[{\"name\":\"decimals\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"balance_of\",\"inputs\":[\"address\"],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"allowance\",\"inputs\":[\"address\",\"address\"],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_name\",\"inputs\":[],\"output\":\"string\",\"view\":true,\"payable\":false},{\"name\":\"get_symbol\",\"inputs\":[],\"output\":\"string\",\"view\":true,\"payable\":false},{\"name\":\"get_total_supply\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_max_supply\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_owner\",\"inputs\":[],\"output\":\"address\",\"view\":true,\"payable\":false},{\"name\":\"get_pending_owner\",\"inputs\":[],\"output\":\"address\",\"view\":true,\"payable\":false},{\"name\":\"get_supply_recipient\",\"inputs\":[],\"output\":\"address\",\"view\":true,\"payable\":false},{\"name\":\"get_contract_name\",\"inputs\":[],\"output\":\"string\",\"view\":true,\"payable\":false},{\"name\":\"is_paused\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_blacklisted\",\"inputs\":[\"address\"],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"get_max_tx_amount\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_max_wallet_amount\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_cooldown_seconds\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_tax_bps\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_tax_recipient\",\"inputs\":[],\"output\":\"address\",\"view\":true,\"payable\":false},{\"name\":\"get_auto_burn_bps\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_tax_collected\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"get_reflection_index\",\"inputs\":[],\"output\":\"int\",\"view\":true,\"payable\":false},{\"name\":\"is_mintable\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_burnable\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_pausable_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_blacklist_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_max_tx_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_max_wallet_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_cooldown_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_tax_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_auto_burn_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"is_reflection_enabled\",\"inputs\":[],\"output\":\"bool\",\"view\":true,\"payable\":false},{\"name\":\"transfer\",\"inputs\":[\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"grant\",\"inputs\":[\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"pull\",\"inputs\":[\"address\",\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"transfer_from\",\"inputs\":[\"address\",\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"mint\",\"inputs\":[\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"burn_from\",\"inputs\":[\"address\",\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"burn\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_paused\",\"inputs\":[\"bool\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_blacklist\",\"inputs\":[\"address\",\"bool\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_max_tx_amount\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_max_wallet_amount\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_cooldown_seconds\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_tax_bps\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_tax_recipient\",\"inputs\":[\"address\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"withdraw_tax\",\"inputs\":[\"address\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"set_auto_burn_bps\",\"inputs\":[\"int\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"transfer_ownership\",\"inputs\":[\"address\"],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"accept_ownership\",\"inputs\":[],\"output\":\"bool\",\"view\":false,\"payable\":false},{\"name\":\"renounce_ownership\",\"inputs\":[],\"output\":\"bool\",\"view\":false,\"payable\":false}],\"events\":[{\"name\":\"Transfer\",\"fields\":[{\"name\":\"from\",\"type\":\"address\"},{\"name\":\"to\",\"type\":\"address\"},{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"Grant\",\"fields\":[{\"name\":\"owner\",\"type\":\"address\"},{\"name\":\"spender\",\"type\":\"address\"},{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"Mint\",\"fields\":[{\"name\":\"to\",\"type\":\"address\"},{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"Burn\",\"fields\":[{\"name\":\"from\",\"type\":\"address\"},{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"Paused\",\"fields\":[]},{\"name\":\"Unpaused\",\"fields\":[]},{\"name\":\"BlacklistUpdated\",\"fields\":[{\"name\":\"account\",\"type\":\"address\"},{\"name\":\"status\",\"type\":\"bool\"}]},{\"name\":\"MaxTxUpdated\",\"fields\":[{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"MaxWalletUpdated\",\"fields\":[{\"name\":\"amount\",\"type\":\"int\"}]},{\"name\":\"CooldownUpdated\",\"fields\":[{\"name\":\"seconds\",\"type\":\"int\"}]},{\"name\":\"TaxUpdated\",\"fields\":[{\"name\":\"bps\",\"type\":\"int\"},{\"name\":\"recipient\",\"type\":\"address\"}]},{\"name\":\"AutoBurnUpdated\",\"fields\":[{\"name\":\"bps\",\"type\":\"int\"}]},{\"name\":\"OwnershipTransferInitiated\",\"fields\":[{\"name\":\"from\",\"type\":\"address\"},{\"name\":\"to\",\"type\":\"address\"}]},{\"name\":\"OwnershipTransferred\",\"fields\":[{\"name\":\"from\",\"type\":\"address\"},{\"name\":\"to\",\"type\":\"address\"}]}]}",
+  "version": "1.0 Rehovot",
+  "disasm": "MLOAD r1, 999\nLDI r2, \"constructor\"\nNEQ r3, r1, r2\nJIF r3, 100\nMLOAD r1, 1001\nMLOAD r2, 1002\nMLOAD r3, 1003\nMLOAD r4, 1004\nMLOAD r5, 1005\nMLOAD r6, 1006\nMLOAD r7, 1007\nMLOAD r8, 1008\nMLOAD r9, 1009\nMLOAD r10, 1010\nMLOAD r11, 1011\nMLOAD r12, 1012\nMLOAD r13, 1013\nMLOAD r14, 1014\nMLOAD r15, 1015\nMLOAD r16, 1016\nMLOAD r17, 1017\nMLOAD r18, 1018\nMLOAD r19, 1019\nMLOAD r20, 1020\nMLOAD r21, 1021\nMLOAD r22, 1022\nMLOAD r23, 1023\nMLOAD r24, 1024\nSTRLEN r25, r1\nLDI r26, 0\nGT r27, r25, r26\nJIF r27, 10000\nLDI r28, \"name empty\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10000\nSTRLEN r25, r1\nLDI r26, 50\nGT r27, r25, r26\nLDI r28, true\nNEQ r27, r27, r28\nJIF r27, 10001\nLDI r29, \"name too long\"\nEMIT \"Require\", r29\nREVERT\nJDEST 10001\nSTRLEN r25, r2\nLDI r26, 0\nGT r27, r25, r26\nJIF r27, 10002\nLDI r28, \"symbol empty\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10002\nSTRLEN r25, r2\nLDI r26, 20\nGT r27, r25, r26\nLDI r28, true\nNEQ r27, r27, r28\nJIF r27, 10003\nLDI r29, \"symbol too long\"\nEMIT \"Require\", r29\nREVERT\nJDEST 10003\nLDI r25, 0\nGT r26, r4, r25\nJIF r26, 10004\nLDI r27, \"supply must be positive\"\nEMIT \"Require\", r27\nREVERT\nJDEST 10004\nLDI r25, 1\nLT r26, r5, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10005\nLDI r28, \"decimals too low\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10005\nLDI r25, 18\nGT r26, r5, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10006\nLDI r28, \"decimals too high\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10006\nASSERT_ADDR r6\nLDI r25, true\nASSERT_ADDR r7\nLDI r25, true\nLDI r25, 0\nEQ r26, r8, r25\nJIF r26, 10007\nLDI r27, \"max_supply not supported\"\nEMIT \"Require\", r27\nREVERT\nJDEST 10007\nLDI r25, 0\nLT r26, r9, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10008\nLDI r28, \"max_tx negative\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10008\nLDI r25, 0\nLT r26, r10, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10009\nLDI r28, \"max_wallet negative\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10009\nLDI r25, 0\nLT r26, r11, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10010\nLDI r28, \"cooldown negative\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10010\nLDI r25, 0\nLT r26, r12, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10011\nLDI r28, \"tax negative\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10011\nLDI r25, 2500\nGT r26, r12, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10012\nLDI r28, \"tax > 25%\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10012\nLDI r25, 0\nLT r26, r14, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10013\nLDI r28, \"auto_burn negative\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10013\nLDI r25, 1000\nGT r26, r14, r25\nLDI r27, true\nNEQ r26, r26, r27\nJIF r26, 10014\nLDI r28, \"auto_burn > 10%\"\nEMIT \"Require\", r28\nREVERT\nJDEST 10014\nADD r25, r12, r14\nLDI r26, 2500\nGT r27, r25, r26\nLDI r28, true\nNEQ r27, r27, r28\nJIF r27, 10015\nLDI r29, \"total fees > 25%\"\nEMIT \"Require\", r29\nREVERT\nJDEST 10015\nSSTORE \"name\", r1\nSSTORE \"symbol\", r2\nSSTORE \"contract_name\", r3\nSSTORE \"decimals\", r5\nSSTORE \"total_supply\", r4\nSSTORE \"max_supply\", r8\nSSTORE \"owner\", r6\nSSTORE \"supply_recipient\", r7\nSSTORE \"max_tx_amount\", r9\nSSTORE \"max_wallet_amount\", r10\nSSTORE \"cooldown_seconds\", r11\nSSTORE \"tax_bps\", r12\nSSTORE \"tax_recipient\", r13\nSSTORE \"auto_burn_bps\", r14\nJIF r15, 10016\nLDI r25, \"false\"\nJMP 10017\nJDEST 10016\nLDI r25, \"true\"\nJDEST 10017\nSSTORE \"mintable_flag\", r25\nJIF r16, 10018\nLDI r25, \"false\"\nJMP 10019\nJDEST 10018\nLDI r25, \"true\"\nJDEST 10019\nSSTORE \"burnable_flag\", r25\nJIF r17, 10020\nLDI r25, \"false\"\nJMP 10021\nJDEST 10020\nLDI r25, \"true\"\nJDEST 10021\nSSTORE \"pausable_flag\", r25\nJIF r18, 10022\nLDI r25, \"false\"\nJMP 10023\nJDEST 10022\nLDI r25, \"true\"\nJDEST 10023\nSSTORE \"blacklist_flag\", r25\nJIF r19, 10024\nLDI r25, \"false\"\nJMP 10025\nJDEST 10024\nLDI r25, \"true\"\nJDEST 10025\nSSTORE \"max_tx_flag\", r25\nJIF r20, 10026\nLDI r25, \"false\"\nJMP 10027\nJDEST 10026\nLDI r25, \"true\"\nJDEST 10027\nSSTORE \"max_wallet_flag\", r25\nJIF r21, 10028\nLDI r25, \"false\"\nJMP 10029\nJDEST 10028\nLDI r25, \"true\"\nJDEST 10029\nSSTORE \"cooldown_flag\", r25\nJIF r22, 10030\nLDI r25, \"false\"\nJMP 10031\nJDEST 10030\nLDI r25, \"true\"\nJDEST 10031\nSSTORE \"tax_flag\", r25\nJIF r23, 10032\nLDI r25, \"false\"\nJMP 10033\nJDEST 10032\nLDI r25, \"true\"\nJDEST 10033\nSSTORE \"auto_burn_flag\", r25\nJIF r24, 10034\nLDI r25, \"false\"\nJMP 10035\nJDEST 10034\nLDI r25, \"true\"\nJDEST 10035\nSSTORE \"reflection_flag\", r25\nLDI r25, false\nJIF r25, 10036\nLDI r26, \"false\"\nJMP 10037\nJDEST 10036\nLDI r26, \"true\"\nJDEST 10037\nSSTORE \"paused\", r26\nLDI r25, false\nJIF r25, 10038\nLDI r26, \"false\"\nJMP 10039\nJDEST 10038\nLDI r26, \"true\"\nJDEST 10039\nSSTORE \"locked\", r26\nLDI r25, 1000000000\nSSTORE \"reflection_index\", r25\nLDI r25, \"balances:\"\nCONCAT r25, r25, r7\nSSTOREK r25, r4\nEMIT \"Mint\", r7, r4\nLDI r25, \"\"\nEMIT \"Transfer\", r25, r7, r4\nSTOP\nJDEST 100\nMLOAD r1, 1000\nLDI r2, \"decimals\"\nEQ r3, r1, r2\nJIF r3, 200\nLDI r2, \"balance_of\"\nEQ r3, r1, r2\nJIF r3, 300\nLDI r2, \"allowance\"\nEQ r3, r1, r2\nJIF r3, 400\nLDI r2, \"get_name\"\nEQ r3, r1, r2\nJIF r3, 500\nLDI r2, \"get_symbol\"\nEQ r3, r1, r2\nJIF r3, 600\nLDI r2, \"get_total_supply\"\nEQ r3, r1, r2\nJIF r3, 700\nLDI r2, \"get_max_supply\"\nEQ r3, r1, r2\nJIF r3, 800\nLDI r2, \"get_owner\"\nEQ r3, r1, r2\nJIF r3, 900\nLDI r2, \"get_pending_owner\"\nEQ r3, r1, r2\nJIF r3, 1000\nLDI r2, \"get_supply_recipient\"\nEQ r3, r1, r2\nJIF r3, 1100\nLDI r2, \"get_contract_name\"\nEQ r3, r1, r2\nJIF r3, 1200\nLDI r2, \"is_paused\"\nEQ r3, r1, r2\nJIF r3, 1300\nLDI r2, \"is_blacklisted\"\nEQ r3, r1, r2\nJIF r3, 1400\nLDI r2, \"get_max_tx_amount\"\nEQ r3, r1, r2\nJIF r3, 1500\nLDI r2, \"get_max_wallet_amount\"\nEQ r3, r1, r2\nJIF r3, 1600\nLDI r2, \"get_cooldown_seconds\"\nEQ r3, r1, r2\nJIF r3, 1700\nLDI r2, \"get_tax_bps\"\nEQ r3, r1, r2\nJIF r3, 1800\nLDI r2, \"get_tax_recipient\"\nEQ r3, r1, r2\nJIF r3, 1900\nLDI r2, \"get_auto_burn_bps\"\nEQ r3, r1, r2\nJIF r3, 2000\nLDI r2, \"get_tax_collected\"\nEQ r3, r1, r2\nJIF r3, 2100\nLDI r2, \"get_reflection_index\"\nEQ r3, r1, r2\nJIF r3, 2200\nLDI r2, \"is_mintable\"\nEQ r3, r1, r2\nJIF r3, 2300\nLDI r2, \"is_burnable\"\nEQ r3, r1, r2\nJIF r3, 2400\nLDI r2, \"is_pausable_enabled\"\nEQ r3, r1, r2\nJIF r3, 2500\nLDI r2, \"is_blacklist_enabled\"\nEQ r3, r1, r2\nJIF r3, 2600\nLDI r2, \"is_max_tx_enabled\"\nEQ r3, r1, r2\nJIF r3, 2700\nLDI r2, \"is_max_wallet_enabled\"\nEQ r3, r1, r2\nJIF r3, 2800\nLDI r2, \"is_cooldown_enabled\"\nEQ r3, r1, r2\nJIF r3, 2900\nLDI r2, \"is_tax_enabled\"\nEQ r3, r1, r2\nJIF r3, 3000\nLDI r2, \"is_auto_burn_enabled\"\nEQ r3, r1, r2\nJIF r3, 3100\nLDI r2, \"is_reflection_enabled\"\nEQ r3, r1, r2\nJIF r3, 3200\nLDI r2, \"transfer\"\nEQ r3, r1, r2\nJIF r3, 3300\nLDI r2, \"grant\"\nEQ r3, r1, r2\nJIF r3, 3400\nLDI r2, \"pull\"\nEQ r3, r1, r2\nJIF r3, 3500\nLDI r2, \"transfer_from\"\nEQ r3, r1, r2\nJIF r3, 3600\nLDI r2, \"mint\"\nEQ r3, r1, r2\nJIF r3, 3700\nLDI r2, \"burn_from\"\nEQ r3, r1, r2\nJIF r3, 3800\nLDI r2, \"burn\"\nEQ r3, r1, r2\nJIF r3, 3900\nLDI r2, \"set_paused\"\nEQ r3, r1, r2\nJIF r3, 4000\nLDI r2, \"set_blacklist\"\nEQ r3, r1, r2\nJIF r3, 4100\nLDI r2, \"set_max_tx_amount\"\nEQ r3, r1, r2\nJIF r3, 4200\nLDI r2, \"set_max_wallet_amount\"\nEQ r3, r1, r2\nJIF r3, 4300\nLDI r2, \"set_cooldown_seconds\"\nEQ r3, r1, r2\nJIF r3, 4400\nLDI r2, \"set_tax_bps\"\nEQ r3, r1, r2\nJIF r3, 4500\nLDI r2, \"set_tax_recipient\"\nEQ r3, r1, r2\nJIF r3, 4600\nLDI r2, \"withdraw_tax\"\nEQ r3, r1, r2\nJIF r3, 4700\nLDI r2, \"set_auto_burn_bps\"\nEQ r3, r1, r2\nJIF r3, 4800\nLDI r2, \"transfer_ownership\"\nEQ r3, r1, r2\nJIF r3, 4900\nLDI r2, \"accept_ownership\"\nEQ r3, r1, r2\nJIF r3, 5000\nLDI r2, \"renounce_ownership\"\nEQ r3, r1, r2\nJIF r3, 5100\nREVERT\nJDEST 200\nSLOAD r1, \"decimals\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 300\nMLOAD r1, 1001\nLDI r2, \"balances:\"\nCONCAT r2, r2, r1\nSLOADK r3, r2\nLDI r4, 0\nADD r3, r4, r3\nMOV r0, r3\nSTOP\nSTOP\nJDEST 400\nMLOAD r1, 1001\nMLOAD r2, 1002\nLDI r3, \"grants:\"\nLDI r4, \":\"\nCONCAT r3, r3, r1\nCONCAT r3, r3, r4\nCONCAT r3, r3, r2\nSLOADK r5, r3\nLDI r6, 0\nADD r5, r6, r5\nMOV r0, r5\nSTOP\nSTOP\nJDEST 500\nSLOAD r1, \"name\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 600\nSLOAD r1, \"symbol\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 700\nSLOAD r1, \"total_supply\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 800\nSLOAD r1, \"max_supply\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 900\nSLOAD r1, \"owner\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1000\nSLOAD r1, \"pending_owner\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1100\nSLOAD r1, \"supply_recipient\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1200\nSLOAD r1, \"contract_name\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1300\nSLOAD r1, \"paused\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1400\nMLOAD r1, 1001\nLDI r2, \"blacklisted:\"\nCONCAT r2, r2, r1\nSLOADK r3, r2\nLDI r4, \"true\"\nEQ r3, r3, r4\nMOV r0, r3\nSTOP\nSTOP\nJDEST 1500\nSLOAD r1, \"max_tx_amount\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1600\nSLOAD r1, \"max_wallet_amount\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1700\nSLOAD r1, \"cooldown_seconds\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1800\nSLOAD r1, \"tax_bps\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 1900\nSLOAD r1, \"tax_recipient\"\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2000\nSLOAD r1, \"auto_burn_bps\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2100\nSLOAD r1, \"tax_collected\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2200\nSLOAD r1, \"reflection_index\"\nLDI r2, 0\nADD r1, r2, r1\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2300\nSLOAD r1, \"mintable_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2400\nSLOAD r1, \"burnable_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2500\nSLOAD r1, \"pausable_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2600\nSLOAD r1, \"blacklist_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2700\nSLOAD r1, \"max_tx_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2800\nSLOAD r1, \"max_wallet_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 2900\nSLOAD r1, \"cooldown_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 3000\nSLOAD r1, \"tax_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 3100\nSLOAD r1, \"auto_burn_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 3200\nSLOAD r1, \"reflection_flag\"\nLDI r2, \"true\"\nEQ r1, r1, r2\nMOV r0, r1\nSTOP\nSTOP\nJDEST 3300\nMLOAD r1, 1001\nMLOAD r2, 1002\nASSERT_ADDR r1\nLDI r3, true\nLDI r3, 0\nGT r4, r2, r3\nJIF r4, 10040\nLDI r5, \"amount must be positive\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10040\nSLOAD r3, \"paused\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nLDI r5, true\nNEQ r5, r3, r5\nJIF r5, 10041\nLDI r6, \"paused\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10041\nCALLER r3\nLDI r4, \"blacklisted:\"\nCONCAT r4, r4, r3\nSLOADK r5, r4\nLDI r6, \"true\"\nEQ r5, r5, r6\nLDI r7, true\nNEQ r7, r5, r7\nJIF r7, 10042\nLDI r8, \"sender blacklisted\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10042\nLDI r3, \"blacklisted:\"\nCONCAT r3, r3, r1\nSLOADK r4, r3\nLDI r5, \"true\"\nEQ r4, r4, r5\nLDI r6, true\nNEQ r6, r4, r6\nJIF r6, 10043\nLDI r7, \"recipient blacklisted\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10043\nSLOAD r3, \"max_tx_flag\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nJIF r3, 10044\nJMP 10045\nJDEST 10044\nSLOAD r3, \"max_tx_amount\"\nLDI r4, 0\nADD r3, r4, r3\nGT r5, r2, r3\nLDI r6, true\nNEQ r5, r5, r6\nJIF r5, 10046\nLDI r7, \"exceeds max tx\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10046\nJDEST 10045\nSLOAD r3, \"cooldown_flag\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nJIF r3, 10047\nJMP 10048\nJDEST 10047\nCALLER r3\nLDI r4, \"last_tx_epoch:\"\nCONCAT r4, r4, r3\nSLOADK r5, r4\nLDI r6, 0\nADD r5, r6, r5\nMOV r3, r5\nEPOCH r4\nSLOAD r5, \"cooldown_seconds\"\nLDI r6, 0\nADD r5, r6, r5\nADD r7, r3, r5\nLT r8, r4, r7\nLDI r9, true\nNEQ r8, r8, r9\nJIF r8, 10049\nLDI r10, \"cooldown active\"\nEMIT \"Require\", r10\nREVERT\nJDEST 10049\nJDEST 10048\nSLOAD r4, \"locked\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nLDI r6, true\nNEQ r6, r4, r6\nJIF r6, 10050\nLDI r7, \"reentrant call\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10050\nLDI r4, true\nJIF r4, 10051\nLDI r5, \"false\"\nJMP 10052\nJDEST 10051\nLDI r5, \"true\"\nJDEST 10052\nSSTORE \"locked\", r5\nCALLER r4\nLDI r5, \"balances:\"\nCONCAT r5, r5, r4\nSLOADK r6, r5\nLDI r7, 0\nADD r6, r7, r6\nMOV r4, r6\nLT r5, r4, r2\nLDI r6, true\nNEQ r5, r5, r6\nJIF r5, 10053\nLDI r7, \"insufficient balance\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10053\nLDI r5, 0\nLDI r6, 0\nSLOAD r7, \"auto_burn_flag\"\nLDI r8, \"true\"\nEQ r7, r7, r8\nJIF r7, 10054\nJMP 10055\nJDEST 10054\nSLOAD r7, \"auto_burn_bps\"\nLDI r8, 0\nADD r7, r8, r7\nMUL r9, r2, r7\nLDI r10, 10000\nDIV r11, r9, r10\nMOV r5, r11\nJDEST 10055\nSLOAD r7, \"tax_flag\"\nLDI r8, \"true\"\nEQ r7, r7, r8\nJIF r7, 10056\nJMP 10057\nJDEST 10056\nSLOAD r7, \"tax_bps\"\nLDI r8, 0\nADD r7, r8, r7\nMUL r9, r2, r7\nLDI r10, 10000\nDIV r11, r9, r10\nMOV r6, r11\nJDEST 10057\nADD r7, r5, r6\nSUB r8, r2, r7\nCALLER r9\nLDI r10, \"balances:\"\nCONCAT r10, r10, r9\nSUB r11, r4, r2\nSSTOREK r10, r11\nLDI r9, 0\nGT r10, r5, r9\nJIF r10, 10058\nJMP 10059\nJDEST 10058\nSLOAD r9, \"total_supply\"\nLDI r10, 0\nADD r9, r10, r9\nSUB r11, r9, r5\nSSTORE \"total_supply\", r11\nCALLER r9\nEMIT \"Burn\", r9, r5\nJDEST 10059\nLDI r9, 0\nGT r10, r6, r9\nJIF r10, 10060\nJMP 10061\nJDEST 10060\nSLOAD r9, \"tax_recipient\"\nLDI r10, \"balances:\"\nCONCAT r10, r10, r9\nSLOAD r11, \"tax_recipient\"\nLDI r12, \"balances:\"\nCONCAT r12, r12, r11\nSLOADK r13, r12\nLDI r14, 0\nADD r13, r14, r13\nADD r15, r13, r6\nSSTOREK r10, r15\nSLOAD r9, \"tax_collected\"\nLDI r10, 0\nADD r9, r10, r9\nADD r11, r9, r6\nSSTORE \"tax_collected\", r11\nJDEST 10061\nLDI r9, \"balances:\"\nCONCAT r9, r9, r1\nLDI r10, \"balances:\"\nCONCAT r10, r10, r1\nSLOADK r11, r10\nLDI r12, 0\nADD r11, r12, r11\nADD r13, r11, r8\nSSTOREK r9, r13\nSLOAD r9, \"max_wallet_flag\"\nLDI r10, \"true\"\nEQ r9, r9, r10\nJIF r9, 10062\nJMP 10063\nJDEST 10062\nLDI r9, \"balances:\"\nCONCAT r9, r9, r1\nSLOADK r10, r9\nLDI r11, 0\nADD r10, r11, r10\nSLOAD r12, \"max_wallet_amount\"\nLDI r13, 0\nADD r12, r13, r12\nGT r14, r10, r12\nLDI r15, true\nNEQ r14, r14, r15\nJIF r14, 10064\nLDI r16, \"exceeds max wallet\"\nEMIT \"Require\", r16\nREVERT\nJDEST 10064\nJDEST 10063\nSLOAD r9, \"cooldown_flag\"\nLDI r10, \"true\"\nEQ r9, r9, r10\nJIF r9, 10065\nJMP 10066\nJDEST 10065\nCALLER r9\nLDI r10, \"last_tx_epoch:\"\nCONCAT r10, r10, r9\nEPOCH r11\nSSTOREK r10, r11\nJDEST 10066\nLDI r9, 0\nGT r10, r7, r9\nJIF r10, 10067\nJMP 10068\nJDEST 10067\nCALLER r9\nSLOAD r10, \"tax_recipient\"\nEMIT \"Transfer\", r9, r10, r6\nLDI r9, 0\nGT r10, r5, r9\nJIF r10, 10069\nJMP 10070\nJDEST 10069\nCALLER r9\nLDI r10, \"\"\nEMIT \"Transfer\", r9, r10, r5\nJDEST 10070\nJDEST 10068\nCALLER r9\nEMIT \"Transfer\", r9, r1, r8\nLDI r9, false\nJIF r9, 10071\nLDI r10, \"false\"\nJMP 10072\nJDEST 10071\nLDI r10, \"true\"\nJDEST 10072\nSSTORE \"locked\", r10\nLDI r9, true\nMOV r0, r9\nSTOP\nSTOP\nJDEST 3400\nMLOAD r1, 1001\nMLOAD r2, 1002\nASSERT_ADDR r1\nLDI r3, true\nLDI r3, \"\"\nNEQ r4, r1, r3\nJIF r4, 10073\nLDI r5, \"grant to zero address\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10073\nCALLER r3\nLDI r4, \"grants:\"\nLDI r5, \":\"\nCONCAT r4, r4, r3\nCONCAT r4, r4, r5\nCONCAT r4, r4, r1\nSSTOREK r4, r2\nCALLER r3\nEMIT \"Grant\", r3, r1, r2\nLDI r3, true\nMOV r0, r3\nSTOP\nSTOP\nJDEST 3500\nMLOAD r1, 1001\nMLOAD r2, 1002\nMLOAD r3, 1003\nASSERT_ADDR r2\nLDI r4, true\nLDI r4, 0\nGT r5, r3, r4\nJIF r5, 10074\nLDI r6, \"amount must be positive\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10074\nSLOAD r4, \"paused\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nLDI r6, true\nNEQ r6, r4, r6\nJIF r6, 10075\nLDI r7, \"paused\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10075\nLDI r4, \"blacklisted:\"\nCONCAT r4, r4, r1\nSLOADK r5, r4\nLDI r6, \"true\"\nEQ r5, r5, r6\nLDI r7, true\nNEQ r7, r5, r7\nJIF r7, 10076\nLDI r8, \"from blacklisted\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10076\nLDI r4, \"blacklisted:\"\nCONCAT r4, r4, r2\nSLOADK r5, r4\nLDI r6, \"true\"\nEQ r5, r5, r6\nLDI r7, true\nNEQ r7, r5, r7\nJIF r7, 10077\nLDI r8, \"to blacklisted\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10077\nSLOAD r4, \"max_tx_flag\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nJIF r4, 10078\nJMP 10079\nJDEST 10078\nSLOAD r4, \"max_tx_amount\"\nLDI r5, 0\nADD r4, r5, r4\nGT r6, r3, r4\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10080\nLDI r8, \"exceeds max tx\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10080\nJDEST 10079\nSLOAD r4, \"cooldown_flag\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nJIF r4, 10081\nJMP 10082\nJDEST 10081\nLDI r4, \"last_tx_epoch:\"\nCONCAT r4, r4, r1\nSLOADK r5, r4\nLDI r6, 0\nADD r5, r6, r5\nMOV r4, r5\nEPOCH r5\nSLOAD r6, \"cooldown_seconds\"\nLDI r7, 0\nADD r6, r7, r6\nADD r8, r4, r6\nLT r9, r5, r8\nLDI r10, true\nNEQ r9, r9, r10\nJIF r9, 10083\nLDI r11, \"cooldown active\"\nEMIT \"Require\", r11\nREVERT\nJDEST 10083\nJDEST 10082\nCALLER r5\nLDI r6, \"grants:\"\nLDI r7, \":\"\nCONCAT r6, r6, r1\nCONCAT r6, r6, r7\nCONCAT r6, r6, r5\nSLOADK r8, r6\nLDI r9, 0\nADD r8, r9, r8\nMOV r5, r8\nLT r6, r5, r3\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10084\nLDI r8, \"not allowed\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10084\nLDI r6, \"balances:\"\nCONCAT r6, r6, r1\nSLOADK r7, r6\nLDI r8, 0\nADD r7, r8, r7\nMOV r6, r7\nLT r7, r6, r3\nLDI r8, true\nNEQ r7, r7, r8\nJIF r7, 10085\nLDI r9, \"insufficient balance\"\nEMIT \"Require\", r9\nREVERT\nJDEST 10085\nLDI r7, \"balances:\"\nCONCAT r7, r7, r1\nSUB r8, r6, r3\nSSTOREK r7, r8\nLDI r7, \"balances:\"\nCONCAT r7, r7, r2\nLDI r8, \"balances:\"\nCONCAT r8, r8, r2\nSLOADK r9, r8\nLDI r10, 0\nADD r9, r10, r9\nADD r11, r9, r3\nSSTOREK r7, r11\nCALLER r7\nLDI r8, \"grants:\"\nLDI r9, \":\"\nCONCAT r8, r8, r1\nCONCAT r8, r8, r9\nCONCAT r8, r8, r7\nSUB r10, r5, r3\nSSTOREK r8, r10\nEMIT \"Transfer\", r1, r2, r3\nLDI r7, true\nMOV r0, r7\nSTOP\nSTOP\nJDEST 3600\nMLOAD r1, 1001\nMLOAD r2, 1002\nMLOAD r3, 1003\nASSERT_ADDR r2\nLDI r4, true\nLDI r4, 0\nGT r5, r3, r4\nJIF r5, 10086\nLDI r6, \"amount must be positive\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10086\nSLOAD r4, \"paused\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nLDI r6, true\nNEQ r6, r4, r6\nJIF r6, 10087\nLDI r7, \"paused\"\nEMIT \"Require\", r7\nREVERT\nJDEST 10087\nLDI r4, \"blacklisted:\"\nCONCAT r4, r4, r1\nSLOADK r5, r4\nLDI r6, \"true\"\nEQ r5, r5, r6\nLDI r7, true\nNEQ r7, r5, r7\nJIF r7, 10088\nLDI r8, \"from blacklisted\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10088\nLDI r4, \"blacklisted:\"\nCONCAT r4, r4, r2\nSLOADK r5, r4\nLDI r6, \"true\"\nEQ r5, r5, r6\nLDI r7, true\nNEQ r7, r5, r7\nJIF r7, 10089\nLDI r8, \"to blacklisted\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10089\nSLOAD r4, \"max_tx_flag\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nJIF r4, 10090\nJMP 10091\nJDEST 10090\nSLOAD r4, \"max_tx_amount\"\nLDI r5, 0\nADD r4, r5, r4\nGT r6, r3, r4\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10092\nLDI r8, \"exceeds max tx\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10092\nJDEST 10091\nSLOAD r4, \"cooldown_flag\"\nLDI r5, \"true\"\nEQ r4, r4, r5\nJIF r4, 10093\nJMP 10094\nJDEST 10093\nLDI r4, \"last_tx_epoch:\"\nCONCAT r4, r4, r1\nSLOADK r5, r4\nLDI r6, 0\nADD r5, r6, r5\nMOV r4, r5\nEPOCH r5\nSLOAD r6, \"cooldown_seconds\"\nLDI r7, 0\nADD r6, r7, r6\nADD r8, r4, r6\nLT r9, r5, r8\nLDI r10, true\nNEQ r9, r9, r10\nJIF r9, 10095\nLDI r11, \"cooldown active\"\nEMIT \"Require\", r11\nREVERT\nJDEST 10095\nJDEST 10094\nCALLER r5\nLDI r6, \"grants:\"\nLDI r7, \":\"\nCONCAT r6, r6, r1\nCONCAT r6, r6, r7\nCONCAT r6, r6, r5\nSLOADK r8, r6\nLDI r9, 0\nADD r8, r9, r8\nMOV r5, r8\nLT r6, r5, r3\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10096\nLDI r8, \"not allowed\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10096\nLDI r6, \"balances:\"\nCONCAT r6, r6, r1\nSLOADK r7, r6\nLDI r8, 0\nADD r7, r8, r7\nMOV r6, r7\nLT r7, r6, r3\nLDI r8, true\nNEQ r7, r7, r8\nJIF r7, 10097\nLDI r9, \"insufficient balance\"\nEMIT \"Require\", r9\nREVERT\nJDEST 10097\nLDI r7, \"balances:\"\nCONCAT r7, r7, r1\nSUB r8, r6, r3\nSSTOREK r7, r8\nLDI r7, \"balances:\"\nCONCAT r7, r7, r2\nLDI r8, \"balances:\"\nCONCAT r8, r8, r2\nSLOADK r9, r8\nLDI r10, 0\nADD r9, r10, r9\nADD r11, r9, r3\nSSTOREK r7, r11\nCALLER r7\nLDI r8, \"grants:\"\nLDI r9, \":\"\nCONCAT r8, r8, r1\nCONCAT r8, r8, r9\nCONCAT r8, r8, r7\nSUB r10, r5, r3\nSSTOREK r8, r10\nEMIT \"Transfer\", r1, r2, r3\nLDI r7, true\nMOV r0, r7\nSTOP\nSTOP\nJDEST 3700\nMLOAD r1, 1001\nMLOAD r2, 1002\nSLOAD r3, \"mintable_flag\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nJIF r3, 10098\nLDI r5, \"mintable disabled\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10098\nCALLER r3\nSLOAD r4, \"owner\"\nEQ r5, r3, r4\nJIF r5, 10099\nLDI r6, \"not owner\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10099\nASSERT_ADDR r1\nLDI r3, true\nLDI r3, 0\nGT r4, r2, r3\nJIF r4, 10100\nLDI r5, \"amount must be positive\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10100\nSLOAD r3, \"max_supply\"\nLDI r4, 0\nADD r3, r4, r3\nLDI r5, 0\nGT r6, r3, r5\nJIF r6, 10101\nJMP 10102\nJDEST 10101\nSLOAD r3, \"total_supply\"\nLDI r4, 0\nADD r3, r4, r3\nADD r5, r3, r2\nSLOAD r6, \"max_supply\"\nLDI r7, 0\nADD r6, r7, r6\nGT r8, r5, r6\nLDI r9, true\nNEQ r8, r8, r9\nJIF r8, 10103\nLDI r10, \"exceeds max supply\"\nEMIT \"Require\", r10\nREVERT\nJDEST 10103\nJDEST 10102\nLDI r3, \"balances:\"\nCONCAT r3, r3, r1\nLDI r4, \"balances:\"\nCONCAT r4, r4, r1\nSLOADK r5, r4\nLDI r6, 0\nADD r5, r6, r5\nADD r7, r5, r2\nSSTOREK r3, r7\nSLOAD r3, \"total_supply\"\nLDI r4, 0\nADD r3, r4, r3\nADD r5, r3, r2\nSSTORE \"total_supply\", r5\nEMIT \"Mint\", r1, r2\nLDI r3, \"\"\nEMIT \"Transfer\", r3, r1, r2\nLDI r3, true\nMOV r0, r3\nSTOP\nSTOP\nJDEST 3800\nMLOAD r1, 1001\nMLOAD r2, 1002\nSLOAD r3, \"burnable_flag\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nJIF r3, 10104\nLDI r5, \"burnable disabled\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10104\nCALLER r3\nSLOAD r4, \"owner\"\nEQ r5, r3, r4\nJIF r5, 10105\nLDI r6, \"not owner\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10105\nASSERT_ADDR r1\nLDI r3, true\nLDI r3, 0\nGT r4, r2, r3\nJIF r4, 10106\nLDI r5, \"amount must be positive\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10106\nLDI r3, \"balances:\"\nCONCAT r3, r3, r1\nSLOADK r4, r3\nLDI r5, 0\nADD r4, r5, r4\nMOV r3, r4\nLT r4, r3, r2\nLDI r5, true\nNEQ r4, r4, r5\nJIF r4, 10107\nLDI r6, \"insufficient balance\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10107\nLDI r4, \"balances:\"\nCONCAT r4, r4, r1\nSUB r5, r3, r2\nSSTOREK r4, r5\nSLOAD r4, \"total_supply\"\nLDI r5, 0\nADD r4, r5, r4\nSUB r6, r4, r2\nSSTORE \"total_supply\", r6\nEMIT \"Burn\", r1, r2\nLDI r4, \"\"\nEMIT \"Transfer\", r1, r4, r2\nLDI r4, true\nMOV r0, r4\nSTOP\nSTOP\nJDEST 3900\nMLOAD r1, 1001\nSLOAD r2, \"burnable_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10108\nLDI r4, \"burnable disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10108\nLDI r2, 0\nGT r3, r1, r2\nJIF r3, 10109\nLDI r4, \"amount must be positive\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10109\nCALLER r2\nLDI r3, \"balances:\"\nCONCAT r3, r3, r2\nSLOADK r4, r3\nLDI r5, 0\nADD r4, r5, r4\nMOV r2, r4\nLT r3, r2, r1\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10110\nLDI r5, \"insufficient balance\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10110\nCALLER r3\nLDI r4, \"balances:\"\nCONCAT r4, r4, r3\nSUB r5, r2, r1\nSSTOREK r4, r5\nSLOAD r3, \"total_supply\"\nLDI r4, 0\nADD r3, r4, r3\nSUB r5, r3, r1\nSSTORE \"total_supply\", r5\nCALLER r3\nEMIT \"Burn\", r3, r1\nCALLER r3\nLDI r4, \"\"\nEMIT \"Transfer\", r3, r4, r1\nLDI r3, true\nMOV r0, r3\nSTOP\nSTOP\nJDEST 4000\nMLOAD r1, 1001\nSLOAD r2, \"pausable_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10111\nLDI r4, \"pausable disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10111\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10112\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10112\nJIF r1, 10113\nLDI r2, \"false\"\nJMP 10114\nJDEST 10113\nLDI r2, \"true\"\nJDEST 10114\nSSTORE \"paused\", r2\nJIF r1, 10115\nEMIT \"Unpaused\", \nJMP 10116\nJDEST 10115\nEMIT \"Paused\", \nJDEST 10116\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4100\nMLOAD r1, 1001\nMLOAD r2, 1002\nSLOAD r3, \"blacklist_flag\"\nLDI r4, \"true\"\nEQ r3, r3, r4\nJIF r3, 10117\nLDI r5, \"blacklist disabled\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10117\nCALLER r3\nSLOAD r4, \"owner\"\nEQ r5, r3, r4\nJIF r5, 10118\nLDI r6, \"not owner\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10118\nASSERT_ADDR r1\nLDI r3, true\nLDI r3, \"blacklisted:\"\nCONCAT r3, r3, r1\nSSTOREK r3, r2\nEMIT \"BlacklistUpdated\", r1, r2\nLDI r3, true\nMOV r0, r3\nSTOP\nSTOP\nJDEST 4200\nMLOAD r1, 1001\nSLOAD r2, \"max_tx_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10119\nLDI r4, \"max_tx disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10119\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10120\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10120\nLDI r2, 0\nGT r3, r1, r2\nJIF r3, 10121\nLDI r4, \"amount must be positive\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10121\nSSTORE \"max_tx_amount\", r1\nEMIT \"MaxTxUpdated\", r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4300\nMLOAD r1, 1001\nSLOAD r2, \"max_wallet_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10122\nLDI r4, \"max_wallet disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10122\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10123\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10123\nLDI r2, 0\nGT r3, r1, r2\nJIF r3, 10124\nLDI r4, \"amount must be positive\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10124\nSSTORE \"max_wallet_amount\", r1\nEMIT \"MaxWalletUpdated\", r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4400\nMLOAD r1, 1001\nSLOAD r2, \"cooldown_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10125\nLDI r4, \"cooldown disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10125\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10126\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10126\nLDI r2, 0\nGT r3, r1, r2\nJIF r3, 10127\nLDI r4, \"cooldown must be positive\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10127\nLDI r2, 86400\nGT r3, r1, r2\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10128\nLDI r5, \"cooldown too long\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10128\nSSTORE \"cooldown_seconds\", r1\nEMIT \"CooldownUpdated\", r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4500\nMLOAD r1, 1001\nSLOAD r2, \"tax_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10129\nLDI r4, \"tax disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10129\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10130\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10130\nLDI r2, 0\nLT r3, r1, r2\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10131\nLDI r5, \"tax negative\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10131\nLDI r2, 2500\nGT r3, r1, r2\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10132\nLDI r5, \"tax > 25%\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10132\nSLOAD r2, \"auto_burn_bps\"\nLDI r3, 0\nADD r2, r3, r2\nADD r4, r1, r2\nLDI r5, 2500\nGT r6, r4, r5\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10133\nLDI r8, \"total fees > 25%\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10133\nSSTORE \"tax_bps\", r1\nSLOAD r2, \"tax_recipient\"\nEMIT \"TaxUpdated\", r1, r2\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4600\nMLOAD r1, 1001\nSLOAD r2, \"tax_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10134\nLDI r4, \"tax disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10134\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10135\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10135\nASSERT_ADDR r1\nLDI r2, true\nSSTORE \"tax_recipient\", r1\nSLOAD r2, \"tax_bps\"\nLDI r3, 0\nADD r2, r3, r2\nEMIT \"TaxUpdated\", r2, r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4700\nMLOAD r1, 1001\nSLOAD r2, \"tax_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10136\nLDI r4, \"tax disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10136\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10137\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10137\nASSERT_ADDR r1\nLDI r2, true\nSLOAD r2, \"tax_collected\"\nLDI r3, 0\nADD r2, r3, r2\nLDI r3, 0\nGT r4, r2, r3\nJIF r4, 10138\nLDI r5, \"no tax to withdraw\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10138\nSLOAD r3, \"tax_recipient\"\nLDI r4, \"balances:\"\nCONCAT r4, r4, r3\nSLOADK r5, r4\nLDI r6, 0\nADD r5, r6, r5\nMOV r3, r5\nLT r4, r3, r2\nLDI r5, true\nNEQ r4, r4, r5\nJIF r4, 10139\nLDI r6, \"insufficient tax balance\"\nEMIT \"Require\", r6\nREVERT\nJDEST 10139\nSLOAD r4, \"tax_recipient\"\nLDI r5, \"balances:\"\nCONCAT r5, r5, r4\nSUB r6, r3, r2\nSSTOREK r5, r6\nLDI r4, \"balances:\"\nCONCAT r4, r4, r1\nLDI r5, \"balances:\"\nCONCAT r5, r5, r1\nSLOADK r6, r5\nLDI r7, 0\nADD r6, r7, r6\nADD r8, r6, r2\nSSTOREK r4, r8\nLDI r4, 0\nSSTORE \"tax_collected\", r4\nSLOAD r4, \"tax_recipient\"\nEMIT \"Transfer\", r4, r1, r2\nLDI r4, true\nMOV r0, r4\nSTOP\nSTOP\nJDEST 4800\nMLOAD r1, 1001\nSLOAD r2, \"auto_burn_flag\"\nLDI r3, \"true\"\nEQ r2, r2, r3\nJIF r2, 10140\nLDI r4, \"auto_burn disabled\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10140\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10141\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10141\nLDI r2, 0\nLT r3, r1, r2\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10142\nLDI r5, \"auto_burn negative\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10142\nLDI r2, 1000\nGT r3, r1, r2\nLDI r4, true\nNEQ r3, r3, r4\nJIF r3, 10143\nLDI r5, \"auto_burn > 10%\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10143\nSLOAD r2, \"tax_bps\"\nLDI r3, 0\nADD r2, r3, r2\nADD r4, r2, r1\nLDI r5, 2500\nGT r6, r4, r5\nLDI r7, true\nNEQ r6, r6, r7\nJIF r6, 10144\nLDI r8, \"total fees > 25%\"\nEMIT \"Require\", r8\nREVERT\nJDEST 10144\nSSTORE \"auto_burn_bps\", r1\nEMIT \"AutoBurnUpdated\", r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 4900\nMLOAD r1, 1001\nCALLER r2\nSLOAD r3, \"owner\"\nEQ r4, r2, r3\nJIF r4, 10145\nLDI r5, \"not owner\"\nEMIT \"Require\", r5\nREVERT\nJDEST 10145\nASSERT_ADDR r1\nLDI r2, true\nSLOAD r2, \"owner\"\nNEQ r3, r1, r2\nJIF r3, 10146\nLDI r4, \"already owner\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10146\nSSTORE \"pending_owner\", r1\nSLOAD r2, \"owner\"\nEMIT \"OwnershipTransferInitiated\", r2, r1\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 5000\nCALLER r1\nSLOAD r2, \"pending_owner\"\nEQ r3, r1, r2\nJIF r3, 10147\nLDI r4, \"not pending owner\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10147\nSLOAD r1, \"owner\"\nSLOAD r2, \"pending_owner\"\nSSTORE \"owner\", r2\nLDI r2, \"\"\nSSTORE \"pending_owner\", r2\nSLOAD r2, \"owner\"\nEMIT \"OwnershipTransferred\", r1, r2\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP\nJDEST 5100\nCALLER r1\nSLOAD r2, \"owner\"\nEQ r3, r1, r2\nJIF r3, 10148\nLDI r4, \"not owner\"\nEMIT \"Require\", r4\nREVERT\nJDEST 10148\nSLOAD r1, \"owner\"\nLDI r2, \"\"\nSSTORE \"owner\", r2\nLDI r2, \"\"\nEMIT \"OwnershipTransferred\", r1, r2\nLDI r2, true\nMOV r0, r2\nSTOP\nSTOP",
+  "verification": {
+    "schema": "aml_safety_report_v1",
+    "engine": "aml_ast_verifier",
+    "proof_model": "formal/coq/aml_value_safety_model.v",
+    "proof_gate": "scripts/check_aml_formal.sh",
+    "program_name": "TokenV2",
+    "verified": false,
+    "safety": "error",
+    "errors": 38,
+    "warnings": 0,
+    "trace": [
+      {
+        "code": "signed_value_storage",
+        "title": "value-like storage must not use signed int",
+        "status": "error",
+        "severity": "error",
+        "findings": 3
+      },
+      {
+        "code": "signed_value_parameter",
+        "title": "value-moving public parameters must not use signed int",
+        "status": "error",
+        "severity": "error",
+        "findings": 14
+      },
+      {
+        "code": "signed_value_flow",
+        "title": "signed values must not flow into value-like storage writes",
+        "status": "error",
+        "severity": "error",
+        "findings": 21
+      },
+      {
+        "code": "unsigned_arithmetic_range_not_proven",
+        "title": "unsigned arithmetic writes must prove range safety",
+        "status": "pass",
+        "severity": "error",
+        "findings": 0
+      },
+      {
+        "code": "supply_invariant_unproven",
+        "title": "balance and total supply writes should preserve conservation",
+        "status": "pass",
+        "severity": "warning",
+        "findings": 0
+      },
+      {
+        "code": "unsigned_parameter_without_positive_guard",
+        "title": "unsigned value parameters should reject zero unless zero is meaningful",
+        "status": "pass",
+        "severity": "warning",
+        "findings": 0
+      },
+      {
+        "code": "unchecked_transfer_result",
+        "title": "native transfer result should be checked",
+        "status": "pass",
+        "severity": "warning",
+        "findings": 0
+      }
+    ],
+    "function_summaries": [
+      {
+        "name": "decimals",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "balance_of",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "allowance",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_name",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_symbol",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_total_supply",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_max_supply",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_owner",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_pending_owner",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_supply_recipient",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_contract_name",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_paused",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_blacklisted",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_max_tx_amount",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_max_wallet_amount",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_cooldown_seconds",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_tax_bps",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_tax_recipient",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_auto_burn_bps",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_tax_collected",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "get_reflection_index",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_mintable",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_burnable",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_pausable_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_blacklist_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_max_tx_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_max_wallet_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_cooldown_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_tax_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_auto_burn_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "is_reflection_enabled",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [],
+        "transitive_writes": [],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "transfer",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "last_tx_epoch",
+          "locked",
+          "tax_collected",
+          "total_supply"
+        ],
+        "transitive_writes": [
+          "balances",
+          "last_tx_epoch",
+          "locked",
+          "tax_collected",
+          "total_supply"
+        ],
+        "value_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "grant",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "grants"
+        ],
+        "transitive_writes": [
+          "grants"
+        ],
+        "value_writes": [
+          "grants"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "pull",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "grants"
+        ],
+        "transitive_writes": [
+          "balances",
+          "grants"
+        ],
+        "value_writes": [
+          "balances",
+          "grants"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "transfer_from",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "grants"
+        ],
+        "transitive_writes": [
+          "balances",
+          "grants"
+        ],
+        "value_writes": [
+          "balances",
+          "grants"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "mint",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "transitive_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "value_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "burn_from",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "transitive_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "value_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "burn",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "transitive_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "value_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "set_paused",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "paused"
+        ],
+        "transitive_writes": [
+          "paused"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "set_blacklist",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "blacklisted"
+        ],
+        "transitive_writes": [
+          "blacklisted"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "set_max_tx_amount",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "max_tx_amount"
+        ],
+        "transitive_writes": [
+          "max_tx_amount"
+        ],
+        "value_writes": [],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "set_max_wallet_amount",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "max_wallet_amount"
+        ],
+        "transitive_writes": [
+          "max_wallet_amount"
+        ],
+        "value_writes": [],
+        "signed_params": [
+          "amt"
+        ]
+      },
+      {
+        "name": "set_cooldown_seconds",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "cooldown_seconds"
+        ],
+        "transitive_writes": [
+          "cooldown_seconds"
+        ],
+        "value_writes": [],
+        "signed_params": [
+          "secs"
+        ]
+      },
+      {
+        "name": "set_tax_bps",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "tax_bps"
+        ],
+        "transitive_writes": [
+          "tax_bps"
+        ],
+        "value_writes": [],
+        "signed_params": [
+          "bps"
+        ]
+      },
+      {
+        "name": "set_tax_recipient",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "tax_recipient"
+        ],
+        "transitive_writes": [
+          "tax_recipient"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "withdraw_tax",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "balances",
+          "tax_collected"
+        ],
+        "transitive_writes": [
+          "balances",
+          "tax_collected"
+        ],
+        "value_writes": [
+          "balances"
+        ],
+        "signed_params": []
+      },
+      {
+        "name": "set_auto_burn_bps",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "auto_burn_bps"
+        ],
+        "transitive_writes": [
+          "auto_burn_bps"
+        ],
+        "value_writes": [],
+        "signed_params": [
+          "bps"
+        ]
+      },
+      {
+        "name": "transfer_ownership",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address"
+        ],
+        "direct_writes": [
+          "pending_owner"
+        ],
+        "transitive_writes": [
+          "pending_owner"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "accept_ownership",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "owner",
+          "pending_owner"
+        ],
+        "transitive_writes": [
+          "owner",
+          "pending_owner"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "renounce_ownership",
+        "visibility": "public",
+        "direct_calls": [],
+        "direct_writes": [
+          "owner"
+        ],
+        "transitive_writes": [
+          "owner"
+        ],
+        "value_writes": [],
+        "signed_params": []
+      },
+      {
+        "name": "constructor",
+        "visibility": "public",
+        "direct_calls": [
+          "assert_address",
+          "len"
+        ],
+        "direct_writes": [
+          "auto_burn_bps",
+          "auto_burn_flag",
+          "balances",
+          "blacklist_flag",
+          "burnable_flag",
+          "contract_name",
+          "cooldown_flag",
+          "cooldown_seconds",
+          "decimals",
+          "locked",
+          "max_supply",
+          "max_tx_amount",
+          "max_tx_flag",
+          "max_wallet_amount",
+          "max_wallet_flag",
+          "mintable_flag",
+          "name",
+          "owner",
+          "pausable_flag",
+          "paused",
+          "reflection_flag",
+          "reflection_index",
+          "supply_recipient",
+          "symbol",
+          "tax_bps",
+          "tax_flag",
+          "tax_recipient",
+          "total_supply"
+        ],
+        "transitive_writes": [
+          "auto_burn_bps",
+          "auto_burn_flag",
+          "balances",
+          "blacklist_flag",
+          "burnable_flag",
+          "contract_name",
+          "cooldown_flag",
+          "cooldown_seconds",
+          "decimals",
+          "locked",
+          "max_supply",
+          "max_tx_amount",
+          "max_tx_flag",
+          "max_wallet_amount",
+          "max_wallet_flag",
+          "mintable_flag",
+          "name",
+          "owner",
+          "pausable_flag",
+          "paused",
+          "reflection_flag",
+          "reflection_index",
+          "supply_recipient",
+          "symbol",
+          "tax_bps",
+          "tax_flag",
+          "tax_recipient",
+          "total_supply"
+        ],
+        "value_writes": [
+          "balances",
+          "total_supply"
+        ],
+        "signed_params": [
+          "initial_supply",
+          "dec",
+          "max_supply",
+          "max_tx_amount",
+          "max_wallet_amount",
+          "cooldown_seconds",
+          "tax_bps",
+          "auto_burn_bps"
+        ]
+      }
+    ],
+    "invariants": [
+      {
+        "code": "supply_balance_conservation",
+        "kind": "derived",
+        "status": "pass",
+        "expression": null,
+        "message": "balance and supply write pattern looks conserved",
+        "fields": [
+          "balances",
+          "total_supply"
+        ],
+        "functions": []
+      }
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "code": "signed_value_storage",
+        "message": "value-like storage uses signed int",
+        "program_name": "TokenV2",
+        "function_name": null,
+        "state_field": "total_supply",
+        "parameter": null
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_storage",
+        "message": "value-like storage uses signed int",
+        "program_name": "TokenV2",
+        "function_name": null,
+        "state_field": "balances",
+        "parameter": null
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_storage",
+        "message": "value-like storage uses signed int",
+        "program_name": "TokenV2",
+        "function_name": null,
+        "state_field": "grants",
+        "parameter": null
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "transfer",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer",
+        "state_field": "total_supply",
+        "parameter": "total_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "grant",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "grant",
+        "state_field": "grants",
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "pull",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "pull",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "pull",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "pull",
+        "state_field": "grants",
+        "parameter": "allowed"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "transfer_from",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer_from",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer_from",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "transfer_from",
+        "state_field": "grants",
+        "parameter": "allowed"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "mint",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "mint",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "mint",
+        "state_field": "total_supply",
+        "parameter": "total_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "burn_from",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "burn_from",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "burn_from",
+        "state_field": "total_supply",
+        "parameter": "total_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "burn",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "burn",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "burn",
+        "state_field": "total_supply",
+        "parameter": "total_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "set_max_tx_amount",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "set_max_wallet_amount",
+        "state_field": null,
+        "parameter": "amt"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "withdraw_tax",
+        "state_field": "balances",
+        "parameter": "bal"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "withdraw_tax",
+        "state_field": "balances",
+        "parameter": "balances"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "set_auto_burn_bps",
+        "state_field": null,
+        "parameter": "bps"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": null,
+        "parameter": "initial_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": null,
+        "parameter": "max_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": null,
+        "parameter": "max_tx_amount"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_parameter",
+        "message": "value-moving public parameter uses signed int",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": null,
+        "parameter": "max_wallet_amount"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": "total_supply",
+        "parameter": "initial_supply"
+      },
+      {
+        "severity": "error",
+        "code": "signed_value_flow",
+        "message": "signed value can flow into value-like storage",
+        "program_name": "TokenV2",
+        "function_name": "constructor",
+        "state_field": "balances",
+        "parameter": "initial_supply"
+      }
+    ]
+  },
+  "certificate": {
+    "schema": "aml_bytecode_certificate_v1",
+    "compiler": "octra_aml",
+    "compiler_version": "1.0 Rehovot",
+    "verification_schema": "aml_safety_report_v1",
+    "source_mode": "single",
+    "source_hash": "ffe817060e7b618e2d61e9249c0577b402d2e986eac85f13916d5bd2e7c70a5f",
+    "bytecode_hash": "693b60300cc5aeb17b1a48ab491a05176f8969a344a3cf8cd0186be077d4783a",
+    "verification_hash": "8726791d26dc88bb82cf4c3635839febe0b31bc1ab7c0e3d8751f39fedefdb70"
+  }
+}

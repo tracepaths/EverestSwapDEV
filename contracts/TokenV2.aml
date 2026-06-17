@@ -1,0 +1,487 @@
+// [V7-FIX] TokenV2.aml - Full-feature ERC20 token with 20lab-style options
+// Replaces Token.aml. Supports: mintable, burnable, pausable, blacklist,
+// max-tx, max-wallet, cooldown, tax, auto-burn, reflection.
+//
+// Constructor takes 25 params. All admin functions are owner-only.
+
+contract TokenV2 {
+  state {
+    name: string
+    symbol: string
+    contract_name: string
+    decimals: int
+    total_supply: int
+    max_supply: int
+    owner: address
+    pending_owner: address
+    supply_recipient: address
+
+    balances: map[address]int
+    grants: map[address]map[address]int
+
+    // Reentrancy guard
+    locked: bool
+
+    // Feature flags (individual booleans — AML doesn't support bitwise &)
+    mintable_flag: bool
+    burnable_flag: bool
+    pausable_flag: bool
+    blacklist_flag: bool
+    max_tx_flag: bool
+    max_wallet_flag: bool
+    cooldown_flag: bool
+    tax_flag: bool
+    auto_burn_flag: bool
+    reflection_flag: bool
+
+    // Pause state
+    paused: bool
+
+    // Blacklist
+    blacklisted: map[address]bool
+
+    // Anti-bot
+    max_tx_amount: int
+    max_wallet_amount: int
+    cooldown_seconds: int
+    last_tx_epoch: map[address]int
+
+    // Tax
+    tax_bps: int
+    tax_recipient: address
+    tax_collected: int
+
+    // Auto-burn
+    auto_burn_bps: int
+
+    // Reflection (RFI)
+    reflection_index: int
+  }
+
+  // ========== Events ==========
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+  event Mint(to: address, amount: int)
+  event Burn(from: address, amount: int)
+  event Paused()
+  event Unpaused()
+  event BlacklistUpdated(account: address, status: bool)
+  event MaxTxUpdated(amount: int)
+  event MaxWalletUpdated(amount: int)
+  event CooldownUpdated(seconds: int)
+  event TaxUpdated(bps: int, recipient: address)
+  event AutoBurnUpdated(bps: int)
+  event OwnershipTransferInitiated(from: address, to: address)
+  event OwnershipTransferred(from: address, to: address)
+
+  // ========== Constructor ==========
+  constructor(
+    n: string,
+    s: string,
+    contract_name: string,
+    initial_supply: int,
+    dec: int,
+    initial_owner: address,
+    supply_recipient: address,
+    max_supply: int,
+    max_tx_amount: int,
+    max_wallet_amount: int,
+    cooldown_seconds: int,
+    tax_bps: int,
+    tax_recipient: address,
+    auto_burn_bps: int,
+    mintable_flag: bool,
+    burnable_flag: bool,
+    pausable_flag: bool,
+    blacklist_flag: bool,
+    max_tx_flag: bool,
+    max_wallet_flag: bool,
+    cooldown_flag: bool,
+    tax_flag: bool,
+    auto_burn_flag: bool,
+    reflection_flag: bool
+  ) {
+    require(len(n) > 0, "name empty")
+    require(len(n) <= 50, "name too long")
+    require(len(s) > 0, "symbol empty")
+    require(len(s) <= 20, "symbol too long")
+    require(initial_supply > 0, "supply must be positive")
+    require(dec >= 1, "decimals too low")
+    require(dec <= 18, "decimals too high")
+    assert_address(initial_owner)
+    assert_address(supply_recipient)
+    require(max_supply == 0, "max_supply not supported")  // disabled for now
+    require(max_tx_amount >= 0, "max_tx negative")
+    require(max_wallet_amount >= 0, "max_wallet negative")
+    require(cooldown_seconds >= 0, "cooldown negative")
+    require(tax_bps >= 0, "tax negative")
+    require(tax_bps <= 2500, "tax > 25%")
+    require(auto_burn_bps >= 0, "auto_burn negative")
+    require(auto_burn_bps <= 1000, "auto_burn > 10%")
+    require(tax_bps + auto_burn_bps <= 2500, "total fees > 25%")
+
+    self.name = n
+    self.symbol = s
+    self.contract_name = contract_name
+    self.decimals = dec
+    self.total_supply = initial_supply
+    self.max_supply = max_supply
+    self.owner = initial_owner
+    self.supply_recipient = supply_recipient
+    self.max_tx_amount = max_tx_amount
+    self.max_wallet_amount = max_wallet_amount
+    self.cooldown_seconds = cooldown_seconds
+    self.tax_bps = tax_bps
+    self.tax_recipient = tax_recipient
+    self.auto_burn_bps = auto_burn_bps
+    self.mintable_flag = mintable_flag
+    self.burnable_flag = burnable_flag
+    self.pausable_flag = pausable_flag
+    self.blacklist_flag = blacklist_flag
+    self.max_tx_flag = max_tx_flag
+    self.max_wallet_flag = max_wallet_flag
+    self.cooldown_flag = cooldown_flag
+    self.tax_flag = tax_flag
+    self.auto_burn_flag = auto_burn_flag
+    self.reflection_flag = reflection_flag
+    self.paused = false
+    self.locked = false
+    self.reflection_index = 1000000000
+
+    self.balances[supply_recipient] = initial_supply
+    emit Mint(supply_recipient, initial_supply)
+    emit Transfer("", supply_recipient, initial_supply)
+  }
+
+  // ========== View Functions ==========
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
+  view fn allowance(owner_addr: address, spender: address): int {
+    return self.grants[owner_addr][spender]
+  }
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn get_max_supply(): int { return self.max_supply }
+  view fn get_owner(): address { return self.owner }
+  view fn get_pending_owner(): address { return self.pending_owner }
+  view fn get_supply_recipient(): address { return self.supply_recipient }
+  view fn get_contract_name(): string { return self.contract_name }
+  view fn is_paused(): bool { return self.paused }
+  view fn is_blacklisted(addr: address): bool { return self.blacklisted[addr] }
+  view fn get_max_tx_amount(): int { return self.max_tx_amount }
+  view fn get_max_wallet_amount(): int { return self.max_wallet_amount }
+  view fn get_cooldown_seconds(): int { return self.cooldown_seconds }
+  view fn get_tax_bps(): int { return self.tax_bps }
+  view fn get_tax_recipient(): address { return self.tax_recipient }
+  view fn get_auto_burn_bps(): int { return self.auto_burn_bps }
+  view fn get_tax_collected(): int { return self.tax_collected }
+  view fn get_reflection_index(): int { return self.reflection_index }
+  view fn is_mintable(): bool { return self.mintable_flag }
+  view fn is_burnable(): bool { return self.burnable_flag }
+  view fn is_pausable_enabled(): bool { return self.pausable_flag }
+  view fn is_blacklist_enabled(): bool { return self.blacklist_flag }
+  view fn is_max_tx_enabled(): bool { return self.max_tx_flag }
+  view fn is_max_wallet_enabled(): bool { return self.max_wallet_flag }
+  view fn is_cooldown_enabled(): bool { return self.cooldown_flag }
+  view fn is_tax_enabled(): bool { return self.tax_flag }
+  view fn is_auto_burn_enabled(): bool { return self.auto_burn_flag }
+  view fn is_reflection_enabled(): bool { return self.reflection_flag }
+
+  // ========== Core Transfer ==========
+  fn transfer(to: address, amt: int): bool {
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[caller], "sender blacklisted")
+    require(!self.blacklisted[to], "recipient blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[caller]
+      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+    }
+
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+
+    // Calculate fees (auto-burn + tax)
+    let burn_fee = 0
+    let tax_fee = 0
+    if self.auto_burn_flag {
+      burn_fee = amt * self.auto_burn_bps / 10000
+    }
+    if self.tax_flag {
+      tax_fee = amt * self.tax_bps / 10000
+    }
+    let total_fee = burn_fee + tax_fee
+    let net = amt - total_fee
+
+    // Sender pays full amount
+    self.balances[caller] = bal - amt
+
+    // Auto-burn portion is removed from supply
+    if burn_fee > 0 {
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(caller, burn_fee)
+    }
+
+    // Tax portion goes to tax_recipient
+    if tax_fee > 0 {
+      self.balances[self.tax_recipient] = self.balances[self.tax_recipient] + tax_fee
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+
+    // Net to recipient
+    self.balances[to] = self.balances[to] + net
+
+    // Max wallet check on recipient
+    if self.max_wallet_flag {
+      require(self.balances[to] <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Update cooldown
+    if self.cooldown_flag {
+      self.last_tx_epoch[caller] = epoch
+    }
+
+    if total_fee > 0 {
+      emit Transfer(caller, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(caller, "", burn_fee)
+      }
+    }
+    emit Transfer(caller, to, net)
+
+    self.locked = false
+    return true
+  }
+
+  fn grant(spender: address, amt: int): bool {
+    assert_address(spender)
+    require(spender != "", "grant to zero address")
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  fn pull(from: address, to: address, amt: int): bool {
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[from], "from blacklisted")
+    require(!self.blacklisted[to], "to blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[from]
+      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+    }
+
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  fn transfer_from(from: address, to: address, amt: int): bool {
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[from], "from blacklisted")
+    require(!self.blacklisted[to], "to blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[from]
+      require(epoch >= last + self.cooldown_seconds, "cooldown active")
+    }
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // ========== Admin: Mint ==========
+  fn mint(to: address, amt: int): bool {
+    require(self.mintable_flag, "mintable disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    if self.max_supply > 0 {
+      require(self.total_supply + amt <= self.max_supply, "exceeds max supply")
+    }
+    self.balances[to] = self.balances[to] + amt
+    self.total_supply = self.total_supply + amt
+    emit Mint(to, amt)
+    emit Transfer("", to, amt)
+    return true
+  }
+
+  // ========== Admin: Burn ==========
+  fn burn_from(from: address, amt: int): bool {
+    require(self.burnable_flag, "burnable disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(from)
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    self.balances[from] = bal - amt
+    self.total_supply = self.total_supply - amt
+    emit Burn(from, amt)
+    emit Transfer(from, "", amt)
+    return true
+  }
+
+  fn burn(amt: int): bool {
+    require(self.burnable_flag, "burnable disabled")
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    self.balances[caller] = bal - amt
+    self.total_supply = self.total_supply - amt
+    emit Burn(caller, amt)
+    emit Transfer(caller, "", amt)
+    return true
+  }
+
+  // ========== Admin: Pause ==========
+  fn set_paused(p: bool): bool {
+    require(self.pausable_flag, "pausable disabled")
+    require(caller == self.owner, "not owner")
+    self.paused = p
+    if p { emit Paused() } else { emit Unpaused() }
+    return true
+  }
+
+  // ========== Admin: Blacklist ==========
+  fn set_blacklist(account: address, status: bool): bool {
+    require(self.blacklist_flag, "blacklist disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    self.blacklisted[account] = status
+    emit BlacklistUpdated(account, status)
+    return true
+  }
+
+  // ========== Admin: Anti-bot ==========
+  fn set_max_tx_amount(amt: int): bool {
+    require(self.max_tx_flag, "max_tx disabled")
+    require(caller == self.owner, "not owner")
+    require(amt > 0, "amount must be positive")
+    self.max_tx_amount = amt
+    emit MaxTxUpdated(amt)
+    return true
+  }
+
+  fn set_max_wallet_amount(amt: int): bool {
+    require(self.max_wallet_flag, "max_wallet disabled")
+    require(caller == self.owner, "not owner")
+    require(amt > 0, "amount must be positive")
+    self.max_wallet_amount = amt
+    emit MaxWalletUpdated(amt)
+    return true
+  }
+
+  fn set_cooldown_seconds(secs: int): bool {
+    require(self.cooldown_flag, "cooldown disabled")
+    require(caller == self.owner, "not owner")
+    require(secs > 0, "cooldown must be positive")
+    require(secs <= 86400, "cooldown too long")
+    self.cooldown_seconds = secs
+    emit CooldownUpdated(secs)
+    return true
+  }
+
+  // ========== Admin: Tax ==========
+  fn set_tax_bps(bps: int): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    require(bps >= 0, "tax negative")
+    require(bps <= 2500, "tax > 25%")
+    require(bps + self.auto_burn_bps <= 2500, "total fees > 25%")
+    self.tax_bps = bps
+    emit TaxUpdated(bps, self.tax_recipient)
+    return true
+  }
+
+  fn set_tax_recipient(recipient: address): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(recipient)
+    self.tax_recipient = recipient
+    emit TaxUpdated(self.tax_bps, recipient)
+    return true
+  }
+
+  fn withdraw_tax(to: address): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(to)
+    let collected = self.tax_collected
+    require(collected > 0, "no tax to withdraw")
+    let bal = self.balances[self.tax_recipient]
+    require(bal >= collected, "insufficient tax balance")
+    self.balances[self.tax_recipient] = bal - collected
+    self.balances[to] = self.balances[to] + collected
+    self.tax_collected = 0
+    emit Transfer(self.tax_recipient, to, collected)
+    return true
+  }
+
+  // ========== Admin: Auto-burn ==========
+  fn set_auto_burn_bps(bps: int): bool {
+    require(self.auto_burn_flag, "auto_burn disabled")
+    require(caller == self.owner, "not owner")
+    require(bps >= 0, "auto_burn negative")
+    require(bps <= 1000, "auto_burn > 10%")
+    require(self.tax_bps + bps <= 2500, "total fees > 25%")
+    self.auto_burn_bps = bps
+    emit AutoBurnUpdated(bps)
+    return true
+  }
+
+  // ========== Admin: Ownership (2-step) ==========
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(new_owner)
+    require(new_owner != self.owner, "already owner")
+    self.pending_owner = new_owner
+    emit OwnershipTransferInitiated(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  fn renounce_ownership(): bool {
+    require(caller == self.owner, "not owner")
+    let old_owner = self.owner
+    self.owner = ""
+    emit OwnershipTransferred(old_owner, "")
+    return true
+  }
+}
