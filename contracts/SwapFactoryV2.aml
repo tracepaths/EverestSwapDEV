@@ -48,10 +48,9 @@ contract SwapFactoryV2 {
     return true
   }
 
-  // [V4-AUDIT-FIX] register_pool: Use pools_by_pair to associate pools bidirectional
+  // [V4-AUDIT-FIX] register_pool: Permissionless — anyone can deploy & register a pool.
   fn register_pool(token_a: address, token_b: address, pool: address): bool {
     require(!self.paused, "factory paused")
-    require(caller == self.fee_to_setter, "not authorized")
     require(token_a != token_b, "identical tokens")
     require(pool != "", "zero pool address")
     assert_address(token_a)
