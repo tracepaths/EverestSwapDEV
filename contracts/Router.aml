@@ -13,6 +13,8 @@ contract Router {
   }
 
   event SwapExact(who: address, token_in: address, token_out: address, amount_in: int, amount_out: int)
+  // [MULTI-HOP] Event for path-based swaps
+  event SwapExactPath(who: address, path_len: int, amount_in: int, amount_out: int)
   // [AUDIT-FIX NEW-34] Pause event
   event Paused(status: bool)
   // [V7-CRIT-8] Two-step ownership events
@@ -181,6 +183,209 @@ contract Router {
 
     emit SwapExact(caller, token_in, token_out, amount_in, amount_out)
     return amount_out
+  }
+
+  // [MULTI-HOP] Swap through multiple pools: token_a → token_b → token_c
+  // path1 = input token, path2 = intermediate token, path3 = output token
+  fn swap_exact_tokens_for_tokens_path_3(amount_in: int, min_out: int, path1: address, path2: address, path3: address, to: address, deadline: int): int {
+    require(!self.paused, "contract paused")
+    require(amount_in > 0, "insufficient input")
+    require(path1 != path2 && path2 != path3 && path1 != path3, "duplicate tokens in path")
+    // [V7-CRIT-4] Enforce 5-minute deadline
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    assert_address(path1)
+    assert_address(path2)
+    assert_address(path3)
+    assert_address(to)
+    require(self.factory != "" && self.factory != origin, "factory not configured")
+    require(min_out > 0, "min_out must be positive")
+    require(to != "", "recipient is zero address")
+    require(path1 != self_addr && path2 != self_addr && path3 != self_addr, "token cannot be router")
+
+    // Pool 1: path1 → path2
+    let pool1_addr = call(self.factory, "get_pool", [path1, path2])
+    require(pool1_addr != "", "no pool for path1/path2")
+    require(to != pool1_addr, "recipient cannot be pool1")
+
+    let p1_token_a = call(pool1_addr, "get_token_a", [])
+    let p1_token_b = call(pool1_addr, "get_token_b", [])
+    let p1_is_a_to_b = (p1_token_a == path1)
+    let expected1 = call(pool1_addr, "get_amount_out", [amount_in, p1_is_a_to_b])
+    require(expected1 > 0, "pool1 returned zero output")
+
+    // Pull input tokens
+    let balance_before = call(path1, "balance_of", [self_addr])
+    require(call(path1, "pull", [caller, self_addr, amount_in]), "token pull failed")
+    let balance_after = call(path1, "balance_of", [self_addr])
+    require(balance_after >= balance_before + amount_in, "token pull did not increase router balance")
+
+    // Grant to pool1 and swap
+    require(call(path1, "grant", [pool1_addr, amount_in]), "token grant failed")
+    let amount1_out = 0
+    if p1_is_a_to_b {
+      amount1_out = call(pool1_addr, "swap_a_for_b", [amount_in, 1, deadline])
+    } else {
+      amount1_out = call(pool1_addr, "swap_b_for_a", [amount_in, 1, deadline])
+    }
+    require(amount1_out > 0, "pool1 swap returned zero")
+
+    // Pool 2: path2 → path3
+    let pool2_addr = call(self.factory, "get_pool", [path2, path3])
+    require(pool2_addr != "", "no pool for path2/path3")
+    require(to != pool2_addr, "recipient cannot be pool2")
+
+    let p2_token_a = call(pool2_addr, "get_token_a", [])
+    let p2_token_b = call(pool2_addr, "get_token_b", [])
+    let p2_is_a_to_b = (p2_token_a == path2)
+
+    // Grant pool2 to pull intermediate tokens from router
+    require(call(path2, "grant", [pool2_addr, amount1_out]), "intermediate token grant failed")
+    let amount2_out = 0
+    if p2_is_a_to_b {
+      amount2_out = call(pool2_addr, "swap_a_for_b", [amount1_out, min_out, deadline])
+    } else {
+      amount2_out = call(pool2_addr, "swap_b_for_a", [amount1_out, min_out, deadline])
+    }
+
+    require(amount2_out >= min_out, "insufficient output from multi-hop swap")
+
+    // Transfer output to recipient
+    require(to != self_addr, "recipient cannot be router")
+    require(call(path3, "transfer", [to, amount2_out]), "output transfer failed")
+
+    emit SwapExactPath(caller, 3, amount_in, amount2_out)
+    return amount2_out
+  }
+
+  // [MULTI-HOP] Swap through 4 tokens (3 hops): A → B → C → D
+  fn swap_exact_tokens_for_tokens_path_4(amount_in: int, min_out: int, path1: address, path2: address, path3: address, path4: address, to: address, deadline: int): int {
+    require(!self.paused, "contract paused")
+    require(amount_in > 0, "insufficient input")
+    require(path1 != path2 && path1 != path3 && path1 != path4 && path2 != path3 && path2 != path4 && path3 != path4, "duplicate tokens in path")
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    assert_address(path1)
+    assert_address(path2)
+    assert_address(path3)
+    assert_address(path4)
+    assert_address(to)
+    require(self.factory != "" && self.factory != origin, "factory not configured")
+    require(min_out > 0, "min_out must be positive")
+    require(to != "", "recipient is zero address")
+    require(path1 != self_addr && path2 != self_addr && path3 != self_addr && path4 != self_addr, "token cannot be router")
+
+    // Pool 1: path1 → path2
+    let pool1_addr = call(self.factory, "get_pool", [path1, path2])
+    require(pool1_addr != "", "no pool for path1/path2")
+    let p1_a = call(pool1_addr, "get_token_a", [])
+    let p1_b = call(pool1_addr, "get_token_b", [])
+    let p1_a2b = (p1_a == path1)
+    require(to != pool1_addr, "recipient cannot be pool1")
+
+    let bal_before = call(path1, "balance_of", [self_addr])
+    require(call(path1, "pull", [caller, self_addr, amount_in]), "token pull failed")
+    require(call(path1, "balance_of", [self_addr]) >= bal_before + amount_in, "token pull did not increase router balance")
+    require(call(path1, "grant", [pool1_addr, amount_in]), "token grant failed")
+    let amt1 = 0
+    if p1_a2b {
+      amt1 = call(pool1_addr, "swap_a_for_b", [amount_in, 1, deadline])
+    } else {
+      amt1 = call(pool1_addr, "swap_b_for_a", [amount_in, 1, deadline])
+    }
+    require(amt1 > 0, "pool1 swap returned zero")
+
+    // Pool 2: path2 → path3
+    let pool2_addr = call(self.factory, "get_pool", [path2, path3])
+    require(pool2_addr != "", "no pool for path2/path3")
+    require(to != pool2_addr, "recipient cannot be pool2")
+    let p2_a = call(pool2_addr, "get_token_a", [])
+    let p2_b = call(pool2_addr, "get_token_b", [])
+    let p2_a2b = (p2_a == path2)
+    require(call(path2, "grant", [pool2_addr, amt1]), "intermediate grant 1 failed")
+    let amt2 = 0
+    if p2_a2b {
+      amt2 = call(pool2_addr, "swap_a_for_b", [amt1, 1, deadline])
+    } else {
+      amt2 = call(pool2_addr, "swap_b_for_a", [amt1, 1, deadline])
+    }
+    require(amt2 > 0, "pool2 swap returned zero")
+
+    // Pool 3: path3 → path4
+    let pool3_addr = call(self.factory, "get_pool", [path3, path4])
+    require(pool3_addr != "", "no pool for path3/path4")
+    require(to != pool3_addr, "recipient cannot be pool3")
+    let p3_a = call(pool3_addr, "get_token_a", [])
+    let p3_b = call(pool3_addr, "get_token_b", [])
+    let p3_a2b = (p3_a == path3)
+    require(call(path3, "grant", [pool3_addr, amt2]), "intermediate grant 2 failed")
+    let amt3 = 0
+    if p3_a2b {
+      amt3 = call(pool3_addr, "swap_a_for_b", [amt2, min_out, deadline])
+    } else {
+      amt3 = call(pool3_addr, "swap_b_for_a", [amt2, min_out, deadline])
+    }
+
+    require(amt3 >= min_out, "insufficient output from multi-hop swap")
+    require(to != self_addr, "recipient cannot be router")
+    require(call(path4, "transfer", [to, amt3]), "output transfer failed")
+
+    emit SwapExactPath(caller, 4, amount_in, amt3)
+    return amt3
+  }
+
+  // [MULTI-HOP] View function to estimate output amount for a 3-token path
+  view fn get_amounts_out_path_3(amount_in: int, path1: address, path2: address, path3: address): int {
+    // Pool 1: path1 → path2
+    let pool1 = call(self.factory, "get_pool", [path1, path2])
+    if pool1 == "" { return 0 }
+    let p1_a = call(pool1, "get_token_a", [])
+    let p1_b = call(pool1, "get_token_b", [])
+    let p1_a2b = (p1_a == path1)
+    let amt1 = call(pool1, "get_amount_out", [amount_in, p1_a2b])
+    if amt1 <= 0 { return 0 }
+
+    // Pool 2: path2 → path3
+    let pool2 = call(self.factory, "get_pool", [path2, path3])
+    if pool2 == "" { return 0 }
+    let p2_a = call(pool2, "get_token_a", [])
+    let p2_b = call(pool2, "get_token_b", [])
+    let p2_a2b = (p2_a == path2)
+    let amt2 = call(pool2, "get_amount_out", [amt1, p2_a2b])
+    return amt2
+  }
+
+  // [MULTI-HOP] View function to estimate output amount for a 4-token path
+  view fn get_amounts_out_path_4(amount_in: int, path1: address, path2: address, path3: address, path4: address): int {
+    let pool1 = call(self.factory, "get_pool", [path1, path2])
+    if pool1 == "" { return 0 }
+    let p1_a2b = (call(pool1, "get_token_a", []) == path1)
+    let amt1 = call(pool1, "get_amount_out", [amount_in, p1_a2b])
+    if amt1 <= 0 { return 0 }
+
+    let pool2 = call(self.factory, "get_pool", [path2, path3])
+    if pool2 == "" { return 0 }
+    let p2_a2b = (call(pool2, "get_token_a", []) == path2)
+    let amt2 = call(pool2, "get_amount_out", [amt1, p2_a2b])
+    if amt2 <= 0 { return 0 }
+
+    let pool3 = call(self.factory, "get_pool", [path3, path4])
+    if pool3 == "" { return 0 }
+    let p3_a2b = (call(pool3, "get_token_a", []) == path3)
+    let amt3 = call(pool3, "get_amount_out", [amt2, p3_a2b])
+    return amt3
+  }
+
+  // View to check if a path is valid (all pools exist)
+  view fn is_path_valid_3(path1: address, path2: address, path3: address): bool {
+    let p1 = call(self.factory, "get_pool", [path1, path2])
+    let p2 = call(self.factory, "get_pool", [path2, path3])
+    return p1 != "" && p2 != ""
+  }
+
+  view fn is_path_valid_4(path1: address, path2: address, path3: address, path4: address): bool {
+    let p1 = call(self.factory, "get_pool", [path1, path2])
+    let p2 = call(self.factory, "get_pool", [path2, path3])
+    let p3 = call(self.factory, "get_pool", [path3, path4])
+    return p1 != "" && p2 != "" && p3 != ""
   }
 
   view fn get_owner(): address {
