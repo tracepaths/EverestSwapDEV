@@ -329,15 +329,16 @@ async function main() {
   console.log(`Balance:  ${balance} OCT | Nonce: ${nonce}\n`);
 
   console.log('Options:');
-  console.log('  1. Full Fresh Deploy   — Compile + Deploy + Init + Test');
-  console.log('  2. Factory Fix         — Recompile + redeploy SwapFactory only');
-  console.log('  3. Init Only           — Initialize existing contracts (skip deploy)');
-  console.log('  4. Test Only           — Run swap/withdraw tests');
-  console.log('  5. Print Addresses     — Show current deployments.json\n');
+  console.log('  1. Full Fresh Deploy       — Compile + Deploy + Init + Test');
+  console.log('  2. Factory Fix             — Recompile + redeploy SwapFactory only');
+  console.log('  3. Init Only               — Initialize existing contracts (skip deploy)');
+  console.log('  4. Test Only               — Run swap/withdraw tests');
+  console.log('  5. Print Addresses         — Show current deployments.json');
+  console.log('  6. Factory + Router Redeploy — Redeploy both Factory & Router (permissionless AMM)\n');
 
   let choice = OPTION;
   if (!choice) {
-    choice = await ask('Select option [1-5]: ');
+    choice = await ask('Select option [1-6]: ');
   } else {
     console.log(`Selected option: ${choice} (via --option)`);
   }
@@ -397,6 +398,44 @@ async function main() {
       } else {
         printSummary(addresses);
       }
+      break;
+    }
+    case '6': {
+      console.log('=== Factory + Router Redeploy (Permissionless AMM) ===\n');
+      console.log('Redeploys Factory (permissionless register_pool) and Router');
+      console.log('from current wallet, then re-registers existing WOCT/OES pool.\n');
+
+      console.log('Recompiling SwapFactory + Router...');
+      const swapFactory = await compile('SwapFactoryV2');
+      const router = await compile('Router');
+
+      console.log('\nDeploying SwapFactory...');
+      currentNonce++;
+      addresses.SwapFactory = await deploy('SwapFactory', swapFactory.bytecode, deployer.address, currentNonce, deployer.keypair.secretKey);
+      saveDeployments(addresses);
+
+      console.log('\nDeploying Router...');
+      currentNonce++;
+      addresses.Router = await deploy('Router', router.bytecode, deployer.address, currentNonce, deployer.keypair.secretKey);
+      saveDeployments(addresses);
+
+      console.log('\nSetting factory on Router...');
+      currentNonce++;
+      await callMethod(addresses.Router, 'set_factory', [addresses.SwapFactory], null, deployer.address, currentNonce, deployer.keypair.secretKey);
+
+      console.log('Setting WOCT on Router...');
+      currentNonce++;
+      await callMethod(addresses.Router, 'set_woct', [addresses.WOCT], null, deployer.address, currentNonce, deployer.keypair.secretKey);
+
+      // Re-register existing WOCT/OES pool in new factory (permissionless)
+      if (addresses.SwapPool) {
+        console.log('\nRe-registering existing WOCT/OES pool in new factory...');
+        currentNonce++;
+        await callMethod(addresses.SwapFactory, 'register_pool', [addresses.WOCT, OES_ADDRESS, addresses.SwapPool], null, deployer.address, currentNonce, deployer.keypair.secretKey);
+      }
+
+      console.log('\nDone. New addresses:');
+      printSummary(addresses);
       break;
     }
     default:
