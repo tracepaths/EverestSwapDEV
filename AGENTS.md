@@ -18,9 +18,9 @@ everestswapdev/
 
 - OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
 - WOCT: `oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe`
-- SwapPool: `octSM8utNG3MLv4Fk2oY1SA2XR99o2i22QUSLbr7Te2tSM4`
-- SwapFactory: `oct6znV2kFvbNnVpQRWKUq3Hw2mhPEW5Yi5NCJfAVPhQrsE`
-- Router: `oct53wqh6cng95sjLTeLGdSWfNNtfnxy8W3A7H4NK9XmQzY`
+- SwapPool: `octFh3NNUj2JmAorPcrLfcy4bzf5tdk88qDCdFnmjHt12X3`
+- SwapFactory: `octFmVqADVjj8v1WSr4ex6EJd2TPRf1JjUVHb3tK29YTXTV`
+- Router: `oct8FKHqsXXE8z11AwKQ7jhEeU7tXefeY4tTRZEnoWK5S3r`
 
 ## RPC Endpoints
 
@@ -117,7 +117,7 @@ Ed25519 keypair → SHA256(pubkey) → Base58 → "oct"+b58 (47 chars)
 - **OES.aml** — ERC20-like token (OCS01 standard). 666M supply. `transfer`, `grant`, `pull`, `balance_of`, `allowance`.
 - **WOCT.aml** — Wrapped OCT. `deposit()` (payable, mints WOCT 1:1), `withdraw(amt)` (burns WOCT, sends OCT via `transfer()`), plus full IOCS01 interface.
 - **SwapPool.aml** — AMM with x*y=k, 0.3% fee. Uses `call()` for token pulls. No native OCT handling.
-- **SwapFactory.aml** — Pool registry. `register_pool(addr)` by deployer, `get_pool()` for address lookup.
+- **SwapFactory.aml** — Pool registry. `register_pool(addr)` is **permissionless** (anyone can register). `get_pool()` for address lookup.
 - **Router.aml** — `swap_exact_tokens_for_tokens(amountIn, minOut, recipient)` — pulls tokens from caller, looks up pool via factory, executes swap.
 
 ## Token Grant/Pull Pattern
