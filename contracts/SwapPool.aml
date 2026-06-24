@@ -774,11 +774,11 @@ contract SwapPool {
   }
 
   view fn total_lp_supply(): int {
-    return self.total_liquidity
+    return self.total_lp
   }
 
   view fn get_pool_info(): (address, address, int, int, int, bool, int) {
-    return (self.token_a, self.token_b, self.reserve_a, self.reserve_b, self.total_liquidity, self.active, self.next_position_id)
+    return (self.token_a, self.token_b, self.reserve_a, self.reserve_b, self.total_lp, self.active, self.next_position_id)
   }
 
   view fn get_token_a(): address {
@@ -795,6 +795,10 @@ contract SwapPool {
 
   view fn get_fee_reserves(): (int, int) {
     return (self.fee_reserve_a, self.fee_reserve_b)
+  }
+
+  view fn get_fee_params(): (int, int) {
+    return (self.fee_numerator, self.fee_denominator)
   }
 
   view fn get_pending_owner(): address {
