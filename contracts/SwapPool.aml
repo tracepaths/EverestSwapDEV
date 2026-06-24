@@ -622,8 +622,13 @@ contract SwapPool {
     let bal_a = call(self.token_a, "balance_of", [self_addr])
     let bal_b = call(self.token_b, "balance_of", [self_addr])
     require(bal_a >= self.reserve_a && bal_b >= self.reserve_b, "sync would reduce reserves")
-    self.reserve_a = bal_a
-    self.reserve_b = bal_b
+    // [AUDIT-FIX M-1] Reserves must EXCLUDE accumulated fees (fee_reserve_a/b) and
+    // any donated tokens. Setting reserve = full balance double-counts fee tokens
+    // that are also tracked separately for claim_fees(), inflating LP payouts.
+    require(bal_a >= self.fee_reserve_a, "bal_a < fee_reserve_a")
+    require(bal_b >= self.fee_reserve_b, "bal_b < fee_reserve_b")
+    self.reserve_a = bal_a - self.fee_reserve_a
+    self.reserve_b = bal_b - self.fee_reserve_b
     self.locked = false
     emit Sync(self.reserve_a, self.reserve_b)
     return true
@@ -790,7 +795,13 @@ contract SwapPool {
   }
 
   view fn get_k(): int {
-    return self.reserve_a * self.reserve_b
+    // [AUDIT-FIX M-3] Overflow guard — mirror the pattern used in get_amount_out.
+    // reserve_a * reserve_b can wrap with large reserves; detect via divide-back.
+    let product = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(product / self.reserve_a == self.reserve_b, "k overflow")
+    }
+    return product
   }
 
   view fn get_fee_reserves(): (int, int) {

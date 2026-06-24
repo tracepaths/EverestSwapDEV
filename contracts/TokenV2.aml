@@ -56,6 +56,9 @@ contract TokenV2 {
 
     // [V7-PASS8] Trusted addresses bypass max_wallet check (e.g., pools, routers)
     trusted_addresses: map[address]bool
+    // [AUDIT-FIX H-1] tax_exempt addresses bypass tax + auto-burn on pull/transfer_from
+    // (DEX pools/routers must move exact amounts to preserve AMM math). Set via set_tax_exempt.
+    tax_exempt: map[address]bool
   }
 
   // ========== Events ==========
@@ -74,6 +77,8 @@ contract TokenV2 {
   event OwnershipTransferred(from: address, to: address)
   // [V7-PASS9] H-15: trusted address event
   event TrustedUpdated(account: address, status: bool)
+  // [AUDIT-FIX H-1] tax exemption event
+  event TaxExemptSet(account: address, status: bool)
 
   // ========== Constructor ==========
   // [V7-PASS8] max_int64 cap = 2^63-1 to prevent overflow in int arithmetic
@@ -326,6 +331,8 @@ contract TokenV2 {
     require(!self.paused, "paused")
     require(!self.blacklisted[from], "from blacklisted")
     require(!self.blacklisted[to], "to blacklisted")
+    // [AUDIT-FIX H-1] Also check the spender (caller) against the blacklist
+    require(!self.blacklisted[caller], "caller blacklisted")
     if self.max_tx_flag {
       require(amt <= self.max_tx_amount, "exceeds max tx")
     }
@@ -338,13 +345,54 @@ contract TokenV2 {
       }
     }
 
+    // [AUDIT-FIX M-5] Reentrancy guard (parity with transfer)
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
     let allowed = self.grants[from][caller]
     require(allowed >= amt, "not allowed")
     let bal = self.balances[from]
     require(bal >= amt, "insufficient balance")
 
+    // [AUDIT-FIX H-1] Apply tax + auto-burn unless the caller is tax_exempt.
+    // DEX pools/routers (tax_exempt) move exact amounts to preserve AMM math;
+    // regular spender-initiated pulls now pay tax, closing the transfer() bypass.
+    let burn_fee = 0
+    let tax_fee = 0
+    if !self.tax_exempt[caller] {
+      if self.auto_burn_flag && self.auto_burn_bps > 0 {
+        require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
+        burn_fee = amt * self.auto_burn_bps / 10000
+      }
+      if self.tax_flag && self.tax_bps > 0 {
+        require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
+        tax_fee = amt * self.tax_bps / 10000
+      }
+    }
+    let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
+    let net = amt - total_fee
+
+    // [AUDIT-FIX H-1] max_wallet on recipient (parity with transfer), unless trusted
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects
     self.balances[from] = bal - amt
-    let new_to_bal = self.balances[to] + amt
+    if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(from, burn_fee)
+    }
+    if tax_fee > 0 && to != self.tax_recipient {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+    let new_to_bal = self.balances[to] + net
     require(new_to_bal > self.balances[to], "to overflow")
     self.balances[to] = new_to_bal
     self.grants[from][caller] = allowed - amt
@@ -354,7 +402,15 @@ contract TokenV2 {
       self.last_tx_epoch[from] = epoch
     }
 
-    emit Transfer(from, to, amt)
+    if total_fee > 0 {
+      emit Transfer(from, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(from, "", burn_fee)
+      }
+    }
+    emit Transfer(from, to, net)
+
+    self.locked = false
     return true
   }
 
@@ -364,6 +420,8 @@ contract TokenV2 {
     require(!self.paused, "paused")
     require(!self.blacklisted[from], "from blacklisted")
     require(!self.blacklisted[to], "to blacklisted")
+    // [AUDIT-FIX H-1] Also check the spender (caller) against the blacklist
+    require(!self.blacklisted[caller], "caller blacklisted")
     if self.max_tx_flag {
       require(amt <= self.max_tx_amount, "exceeds max tx")
     }
@@ -374,12 +432,53 @@ contract TokenV2 {
         require(epoch >= last + self.cooldown_blocks, "cooldown active")
       }
     }
+
+    // [AUDIT-FIX M-5] Reentrancy guard (parity with transfer)
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
     let allowed = self.grants[from][caller]
     require(allowed >= amt, "not allowed")
     let bal = self.balances[from]
     require(bal >= amt, "insufficient balance")
+
+    // [AUDIT-FIX H-1] Apply tax + auto-burn unless the caller is tax_exempt (see pull).
+    let burn_fee = 0
+    let tax_fee = 0
+    if !self.tax_exempt[caller] {
+      if self.auto_burn_flag && self.auto_burn_bps > 0 {
+        require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
+        burn_fee = amt * self.auto_burn_bps / 10000
+      }
+      if self.tax_flag && self.tax_bps > 0 {
+        require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
+        tax_fee = amt * self.tax_bps / 10000
+      }
+    }
+    let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
+    let net = amt - total_fee
+
+    // [AUDIT-FIX H-1] max_wallet on recipient (parity with transfer), unless trusted
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects
     self.balances[from] = bal - amt
-    let new_to_bal = self.balances[to] + amt
+    if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(from, burn_fee)
+    }
+    if tax_fee > 0 && to != self.tax_recipient {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+    let new_to_bal = self.balances[to] + net
     require(new_to_bal > self.balances[to], "to overflow")
     self.balances[to] = new_to_bal
     self.grants[from][caller] = allowed - amt
@@ -388,7 +487,15 @@ contract TokenV2 {
       self.last_tx_epoch[from] = epoch
     }
 
-    emit Transfer(from, to, amt)
+    if total_fee > 0 {
+      emit Transfer(from, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(from, "", burn_fee)
+      }
+    }
+    emit Transfer(from, to, net)
+
+    self.locked = false
     return true
   }
 
@@ -475,6 +582,18 @@ contract TokenV2 {
     require(account != "", "trusted zero")
     self.trusted_addresses[account] = status
     emit TrustedUpdated(account, status)
+    return true
+  }
+
+  // [AUDIT-FIX H-1] Tax exemption: pools/routers marked tax_exempt move tokens
+  // via pull/transfer_from without tax + auto-burn so AMM math stays exact.
+  // Regular spender-initiated pulls pay tax, closing the transfer() bypass.
+  fn set_tax_exempt(account: address, status: bool): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    require(account != "", "tax_exempt zero")
+    self.tax_exempt[account] = status
+    emit TaxExemptSet(account, status)
     return true
   }
 

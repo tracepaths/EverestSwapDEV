@@ -29,6 +29,9 @@ contract OES {
     pending_owner: address
     // [SECURITY] Snapshot of rewards_vault at proposal time to prevent DoS
     pending_vault_snapshot: address
+    // [AUDIT-FIX M-4] Explicit reentrancy guard state. Previously relied on AML
+    // auto-declaration; make it explicit for clarity and future-proofing.
+    locked: bool
   }
 
   event Transfer(from: address, to: address, amount: int)
@@ -80,6 +83,8 @@ contract OES {
     self.pending_owner = ""
     // [SECURITY] Initialize vault snapshot
     self.pending_vault_snapshot = ""
+    // [AUDIT-FIX M-4] Explicit init of reentrancy guard (defaults to false anyway)
+    self.locked = false
   }
 
   view fn decimals(): int { return self.decimals }

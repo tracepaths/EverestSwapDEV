@@ -251,12 +251,15 @@ contract WOCT {
   fn rescue_native(): bool {
     require(caller == self.owner, "not authorized")
     require(!self.locked, "reentrancy guard")
-    // The surplus is the contract's actual native balance minus what is owed to WOCT holders.
-    // We use balance(self_addr) to query the contract's OCT balance.
     self.locked = true
     let contract_balance = balance(self_addr)
-    require(contract_balance > self.total_supply, "no surplus to rescue")
-    let surplus = contract_balance - self.total_supply
+    // [AUDIT-FIX H-2] Surplus must exclude OCT already owed to users as pending
+    // withdrawals. Previously surplus = balance - total_supply, which counted
+    // pending-withdrawal OCT as rescuable and let the owner sweep funds users had
+    // already claimed via withdraw() but not yet pulled via claim_withdrawal().
+    // After such a rescue, claim_withdrawal() would revert forever (balance < pending).
+    require(contract_balance > self.total_supply + self.total_pending_withdrawals, "no surplus to rescue")
+    let surplus = contract_balance - self.total_supply - self.total_pending_withdrawals
     transfer(self.owner, surplus)
     emit NativeRescued(self.owner, surplus)
     self.locked = false

@@ -59,6 +59,13 @@ contract SwapFactoryV2 {
 
     require(self.pool_token_pair[pool] == "" || self.pool_token_pair[pool] == "0", "pool already registered")
 
+    // [AUDIT-FIX H-3] Verify the pool is a genuine initialized SwapPool for this
+    // exact pair. Prevents an attacker from front-running a new pair registration
+    // with an arbitrary/malicious address. View calls return the stored token; if
+    // the pool is not a contract or holds different tokens, registration reverts.
+    require(call(pool, "get_token_a", []) == token_a, "pool token_a mismatch")
+    require(call(pool, "get_token_b", []) == token_b, "pool token_b mismatch")
+
     // Validate that no pool already exists for this specific token pair
     require(self.pools_by_pair[token_a][token_b] == "" || self.pools_by_pair[token_a][token_b] == "0", "pool already exists for this pair")
     require(self.pools_by_pair[token_b][token_a] == "" || self.pools_by_pair[token_b][token_a] == "0", "pool already exists for this pair")
