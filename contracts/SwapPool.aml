@@ -88,11 +88,20 @@ contract SwapPool {
     assert_address(addr_a)
     assert_address(addr_b)
     require(addr_a != addr_b, "identical tokens")
-    // [V2-AUDIT-FIX V2-LOW-1] Tokens are considered unset only when they still hold the
-    // origin sentinel.  Once set, they cannot be changed even if total_lp drops back to 0.
     require(self.token_a == origin && self.token_b == origin, "tokens already set")
     self.token_a = addr_a
     self.token_b = addr_b
+    return true
+  }
+
+  // [ARCH] set_factory: one-time binding to the SwapFactory address.
+  // Enables the equilibrium price guard callback during first add_liquidity.
+  fn set_factory(addr: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.factory == origin, "factory already set")
+    assert_address(addr)
+    require(addr != "", "zero factory address")
+    self.factory = addr
     return true
   }
 
@@ -152,6 +161,12 @@ contract SwapPool {
       // [V2-AUDIT-FIX V2-CRIT-2] Revert atomically if min_lp not satisfied
       require(lp >= min_lp, "min_lp not satisfied")
 
+      // [ARCH] Equilibrium price guard — consult factory for transitive price
+      // validation against existing pools via the hub token. Factory returns
+      // true (allow) if no hub path exists or computation overflows; reverts
+      // (call returns false) if initial ratio diverges beyond tolerance.
+      require(call(self.factory, "validate_initial_price", [self.token_a, self.token_b, amount_a, amount_b]), "equilibrium price check failed")
+
       // [V7-CRIT-1] Now safe to pull tokens — all validations have passed
       require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
       require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
@@ -175,15 +190,15 @@ contract SwapPool {
       self.position_owner_count[caller] += 1
       // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
       require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
-      let _tail1 = self.user_tail_position[caller]
-      if _tail1 == 0 {
+      let _prev_tail = self.user_tail_position[caller]
+      if _prev_tail == 0 {
         self.user_head_position[caller] = position_id
         self.user_tail_position[caller] = position_id
         self.user_position_prev[position_id] = 0
         self.user_position_next[position_id] = 0
       } else {
-        self.user_position_next[_tail1] = position_id
-        self.user_position_prev[position_id] = _tail1
+        self.user_position_next[_prev_tail] = position_id
+        self.user_position_prev[position_id] = _prev_tail
         self.user_tail_position[caller] = position_id
         self.user_position_next[position_id] = 0
       }
@@ -245,15 +260,15 @@ contract SwapPool {
     self.position_owner_count[caller] += 1
     // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
     require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
-    let _tail2 = self.user_tail_position[caller]
-    if _tail2 == 0 {
+    let _prev_tail = self.user_tail_position[caller]
+    if _prev_tail == 0 {
       self.user_head_position[caller] = position_id
       self.user_tail_position[caller] = position_id
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0
     } else {
-      self.user_position_next[_tail2] = position_id
-      self.user_position_prev[position_id] = _tail2
+      self.user_position_next[_prev_tail] = position_id
+      self.user_position_prev[position_id] = _prev_tail
       self.user_tail_position[caller] = position_id
       self.user_position_next[position_id] = 0
     }
@@ -317,33 +332,33 @@ contract SwapPool {
     self.position_owner_count[caller] -= 1
     // [SECURITY] Unlink from user's position linked list (inlined — AML doesn't support self.fn() calls)
     // M-7: Defense-in-depth — verify position is in the owner's list before unlinking
-    let _cur = self.user_head_position[caller]
-    let _found = false
-    let _sc = 0
-    while _cur != 0 && _sc < 10001 {
-      if _cur == position_id {
-        _found = true
+    let _current_pos = self.user_head_position[caller]
+    let _match_found = false
+    let _scan_count = 0
+    while _current_pos != 0 && _scan_count < 10001 {
+      if _current_pos == position_id {
+        _match_found = true
       }
-      _cur = self.user_position_next[_cur]
-      _sc += 1
+      _current_pos = self.user_position_next[_current_pos]
+      _scan_count += 1
     }
-    if !_found {
+    if !_match_found {
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0
     } else {
-      let _prev = self.user_position_prev[position_id]
-      let _next = self.user_position_next[position_id]
-      if _prev != 0 {
-        self.user_position_next[_prev] = _next
+      let _prev_pos = self.user_position_prev[position_id]
+      let _next_pos = self.user_position_next[position_id]
+      if _prev_pos != 0 {
+        self.user_position_next[_prev_pos] = _next_pos
       }
-      if _next != 0 {
-        self.user_position_prev[_next] = _prev
+      if _next_pos != 0 {
+        self.user_position_prev[_next_pos] = _prev_pos
       }
       if self.user_head_position[caller] == position_id {
-        self.user_head_position[caller] = _next
+        self.user_head_position[caller] = _next_pos
       }
       if self.user_tail_position[caller] == position_id {
-        self.user_tail_position[caller] = _prev
+        self.user_tail_position[caller] = _prev_pos
       }
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0
@@ -424,33 +439,33 @@ contract SwapPool {
     self.position_owner_count[caller] -= 1
     // [SECURITY] Unlink from user's position linked list (inlined — AML doesn't support self.fn() calls)
     // M-7: Defense-in-depth — verify position is in the owner's list before unlinking
-    let _cur = self.user_head_position[caller]
-    let _found = false
-    let _sc = 0
-    while _cur != 0 && _sc < 10001 {
-      if _cur == position_id {
-        _found = true
+    let _current_pos = self.user_head_position[caller]
+    let _match_found = false
+    let _scan_count = 0
+    while _current_pos != 0 && _scan_count < 10001 {
+      if _current_pos == position_id {
+        _match_found = true
       }
-      _cur = self.user_position_next[_cur]
-      _sc += 1
+      _current_pos = self.user_position_next[_current_pos]
+      _scan_count += 1
     }
-    if !_found {
+    if !_match_found {
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0
     } else {
-      let _prev = self.user_position_prev[position_id]
-      let _next = self.user_position_next[position_id]
-      if _prev != 0 {
-        self.user_position_next[_prev] = _next
+      let _prev_pos = self.user_position_prev[position_id]
+      let _next_pos = self.user_position_next[position_id]
+      if _prev_pos != 0 {
+        self.user_position_next[_prev_pos] = _next_pos
       }
-      if _next != 0 {
-        self.user_position_prev[_next] = _prev
+      if _next_pos != 0 {
+        self.user_position_prev[_next_pos] = _prev_pos
       }
       if self.user_head_position[caller] == position_id {
-        self.user_head_position[caller] = _next
+        self.user_head_position[caller] = _next_pos
       }
       if self.user_tail_position[caller] == position_id {
-        self.user_tail_position[caller] = _prev
+        self.user_tail_position[caller] = _prev_pos
       }
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0

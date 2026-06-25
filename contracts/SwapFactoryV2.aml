@@ -20,6 +20,9 @@ contract SwapFactoryV2 {
     // Value is 0-based index in trusted_list; absent (default 0) means not in list
     // (collision with legitimate index 0 is avoided by storing position+1)
     trusted_position: map[address]int
+    // [ARCH] Equilibrium price guard config (V4-hook-inspired, adapted for AML)
+    hub_token: address
+    price_tolerance_bps: int
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
@@ -32,6 +35,9 @@ contract SwapFactoryV2 {
   event Paused(status: bool)
   // [SECURITY] Event for fee_to changes
   event FeeToChanged(old_fee_to: address, new_fee_to: address)
+  // [ARCH] Equilibrium guard events
+  event HubTokenSet(old_hub: address, new_hub: address)
+  event PriceToleranceSet(old_bps: int, new_bps: int)
 
   constructor() {
     self.fee_to_setter = origin
@@ -39,6 +45,9 @@ contract SwapFactoryV2 {
     self.pool_count = 0
     self.pending_setter = ""
     self.paused = false
+    // [ARCH] Equilibrium guard defaults: no hub (disabled), 1% tolerance
+    self.hub_token = ""
+    self.price_tolerance_bps = 100
   }
 
   fn set_paused(status: bool): bool {
@@ -271,5 +280,123 @@ contract SwapFactoryV2 {
 
   view fn get_fee_to_setter(): address {
     return self.fee_to_setter
+  }
+
+  // [ARCH] Equilibrium price guard — admin config
+
+  fn set_hub_token(token: address): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    assert_address(token)
+    let old = self.hub_token
+    self.hub_token = token
+    emit HubTokenSet(old, token)
+    return true
+  }
+
+  fn set_price_tolerance_bps(bps: int): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    require(bps > 0 && bps <= 500, "tolerance must be 1-500 bps (0.01%-5%)")
+    let old = self.price_tolerance_bps
+    self.price_tolerance_bps = bps
+    emit PriceToleranceSet(old, bps)
+    return true
+  }
+
+  // [ARCH] validate_initial_price — called by SwapPool during first add_liquidity.
+  // Derives the equilibrium price of token_a in token_b via the hub token path
+  // (token_a → hub → token_b) using existing pools' get_price() (single-int return).
+  // Returns true (allow) if: hub not configured, direct hub pair, no hub path,
+  // or computation overflows int64 (extreme ratios). Only enforces when all math
+  // fits safely — overflow-safe fallback prevents DoS.
+  fn validate_initial_price(token_a: address, token_b: address, amount_a: int, amount_b: int): bool {
+    let hub = self.hub_token
+    if hub == "" || hub == "0" {
+      return true
+    }
+    if token_a == hub || token_b == hub {
+      return true
+    }
+    if amount_a <= 0 || amount_b <= 0 {
+      return true
+    }
+
+    let pool_ah = self.pools_by_pair[token_a][hub]
+    if pool_ah == "" || pool_ah == "0" {
+      pool_ah = self.pools_by_pair[hub][token_a]
+    }
+    let pool_hb = self.pools_by_pair[hub][token_b]
+    if pool_hb == "" || pool_hb == "0" {
+      pool_hb = self.pools_by_pair[token_b][hub]
+    }
+    if pool_ah == "" || pool_ah == "0" || pool_hb == "" || pool_hb == "0" {
+      return true
+    }
+
+    let ah_price = call(pool_ah, "get_price", [])
+    let hb_price = call(pool_hb, "get_price", [])
+    if ah_price <= 0 || hb_price <= 0 {
+      return true
+    }
+
+    let ah_ta = call(pool_ah, "get_token_a", [])
+    let hb_ta = call(pool_hb, "get_token_a", [])
+
+    // price_a_in_hub: how much hub per 1 token_a, scaled by 10^6
+    let price_a_in_hub = ah_price
+    if ah_ta != token_a {
+      if ah_price < 1000000 {
+        return true
+      }
+      price_a_in_hub = 1000000000000 / ah_price
+    }
+
+    // price_hub_in_b: how much token_b per 1 hub, scaled by 10^6
+    let price_hub_in_b = hb_price
+    if hb_ta != hub {
+      if hb_price < 1000000 {
+        return true
+      }
+      price_hub_in_b = 1000000000000 / hb_price
+    }
+
+    // eq_price = price_a_in_hub * price_hub_in_b / 10^6 (scaled by 10^6)
+    let prod = price_a_in_hub * price_hub_in_b
+    if price_a_in_hub > 0 && prod / price_a_in_hub != price_hub_in_b {
+      return true
+    }
+    let eq_price = prod / 1000000
+    if eq_price <= 0 {
+      return true
+    }
+
+    // user_price = amount_b * 10^6 / amount_a (scaled by 10^6)
+    let amt_b_scaled = amount_b * 1000000
+    if amount_b > 0 && amt_b_scaled / amount_b != 1000000 {
+      return true
+    }
+    let user_price = amt_b_scaled / amount_a
+    if user_price <= 0 {
+      return true
+    }
+
+    // Tolerance: |user_price - eq_price| / eq_price <= tolerance_bps / 10000
+    let diff = 0
+    if user_price > eq_price {
+      diff = user_price - eq_price
+    } else {
+      diff = eq_price - user_price
+    }
+
+    let lhs = diff * 10000
+    if diff > 0 && lhs / diff != 10000 {
+      return true
+    }
+    let rhs = eq_price * self.price_tolerance_bps
+    if eq_price > 0 && rhs / eq_price != self.price_tolerance_bps {
+      return true
+    }
+
+    require(lhs <= rhs, "initial price misaligned with equilibrium")
+    return true
   }
 }
