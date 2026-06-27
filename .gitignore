@@ -6,3 +6,4 @@ dist/
 # [SECURITY] M-5: Don't commit indexer telemetry data (3MB+, grows indefinitely)
 indexer/data/
 
+.github-config
