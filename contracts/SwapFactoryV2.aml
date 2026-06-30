@@ -23,6 +23,10 @@ contract SwapFactoryV2 {
     // [ARCH] Equilibrium price guard config (V4-hook-inspired, adapted for AML)
     hub_token: address
     price_tolerance_bps: int
+    // [V8] Token trust rating — LP-weighted community voting
+    token_votes: map[address]int              // token -> total vote weight
+    voter_has_voted: map[address]map[address]bool  // voter -> token -> voted
+    voter_weight: map[address]map[address]int      // voter -> token -> vote weight used
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
@@ -38,6 +42,9 @@ contract SwapFactoryV2 {
   // [ARCH] Equilibrium guard events
   event HubTokenSet(old_hub: address, new_hub: address)
   event PriceToleranceSet(old_bps: int, new_bps: int)
+  // [V8] Trust rating voting events
+  event TokenVoted(token: address, voter: address, weight: int)
+  event TokenUnvoted(token: address, voter: address, weight: int)
 
   constructor() {
     self.fee_to_setter = origin
@@ -398,5 +405,66 @@ contract SwapFactoryV2 {
 
     require(lhs <= rhs, "initial price misaligned with equilibrium")
     return true
+  }
+
+  // [V8] Trust rating — LP-weighted community voting
+  // Vote weight = min(voter's locked LP, 5% of total locked LP) in the token's pool.
+  // Requires the token to have a pool with the hub token (WOCT).
+  fn vote_token(token: address): bool {
+    require(!self.paused, "factory paused")
+    assert_address(token)
+    require(token != "", "zero token address")
+    require(token != self.hub_token, "cannot vote on hub token")
+
+    // Find pool for token/hub pair
+    let pool = self.pools_by_pair[token][self.hub_token]
+    if pool == "" || pool == "0" {
+      pool = self.pools_by_pair[self.hub_token][token]
+    }
+    require(pool != "" && pool != "0", "no pool for token")
+
+    // Get voter's locked LP in this pool
+    let locked_lp = int(call(pool, "get_locked_liquidity", [caller]))
+    require(locked_lp > 0, "no locked LP")
+
+    // Cap at 5% of total locked LP
+    let total_locked = int(call(pool, "get_total_locked_lp", []))
+    let max_vote = total_locked / 20
+    let vote_weight = locked_lp
+    if vote_weight > max_vote {
+      vote_weight = max_vote
+    }
+    require(vote_weight > 0, "vote weight too small")
+
+    // Deduct previous vote if exists
+    if self.voter_has_voted[caller][token] {
+      let prev_weight = self.voter_weight[caller][token]
+      self.token_votes[token] = self.token_votes[token] - prev_weight
+    }
+
+    self.voter_has_voted[caller][token] = true
+    self.voter_weight[caller][token] = vote_weight
+    self.token_votes[token] = self.token_votes[token] + vote_weight
+    emit TokenVoted(token, caller, vote_weight)
+    return true
+  }
+
+  fn unvote_token(token: address): bool {
+    assert_address(token)
+    require(self.voter_has_voted[caller][token], "not voted")
+    let prev_weight = self.voter_weight[caller][token]
+    self.voter_has_voted[caller][token] = false
+    self.voter_weight[caller][token] = 0
+    self.token_votes[token] = self.token_votes[token] - prev_weight
+    emit TokenUnvoted(token, caller, prev_weight)
+    return true
+  }
+
+  view fn get_token_votes(token: address): int {
+    return self.token_votes[token]
+  }
+
+  view fn has_voted(voter: address, token: address): bool {
+    return self.voter_has_voted[voter][token]
   }
 }
