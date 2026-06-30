@@ -72,7 +72,7 @@ if (fs.existsSync(EVENTS_FILE)) {
   try { events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf-8')); } catch {}
 }
 
-// [V7-PASS9] M-14: TokenV2 events we track (Transfer, Mint, Burn, etc.)
+// [V7-PASS9] M-14: Token events we track (Transfer, Mint, Burn, etc.)
 const TRACKED_EVENTS = [
   'Transfer', 'Approval', 'Grant',
   'Mint', 'Burn',
@@ -128,7 +128,7 @@ async function pollPrice() {
 setInterval(pollPrice, 5000);
 pollPrice();
 
-// [V7-PASS9] M-14: poll events from the pool contract (and TokenV2 contracts later)
+// [V7-PASS9] M-14: poll events from the pool contract (and Token contracts later)
 let isPollingEvents = false;
 async function pollEvents() {
   if (isPollingEvents) return;
@@ -148,7 +148,7 @@ async function pollEvents() {
     const fromBlock = lastEventBlock + 1;
     const toBlock = currentBlock;
     if (fromBlock > toBlock) return;
-    // Fetch logs for the pool contract (TokenV2 events when extended)
+    // Fetch logs for the pool contract (Token events when extended)
     const logs = await rpc('get_logs', [{
       from_block: fromBlock,
       to_block: toBlock,

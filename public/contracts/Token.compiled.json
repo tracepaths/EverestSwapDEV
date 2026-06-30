@@ -10,7 +10,7 @@
     "engine": "aml_ast_verifier",
     "proof_model": "formal/coq/aml_value_safety_model.v",
     "proof_gate": "scripts/check_aml_formal.sh",
-    "program_name": "TokenV2",
+    "program_name": "Token",
     "verified": false,
     "safety": "error",
     "errors": 38,
@@ -783,7 +783,7 @@
         "severity": "error",
         "code": "signed_value_storage",
         "message": "value-like storage uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": null,
         "state_field": "total_supply",
         "parameter": null
@@ -792,7 +792,7 @@
         "severity": "error",
         "code": "signed_value_storage",
         "message": "value-like storage uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": null,
         "state_field": "balances",
         "parameter": null
@@ -801,7 +801,7 @@
         "severity": "error",
         "code": "signed_value_storage",
         "message": "value-like storage uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": null,
         "state_field": "grants",
         "parameter": null
@@ -810,7 +810,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer",
         "state_field": null,
         "parameter": "amt"
@@ -819,7 +819,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer",
         "state_field": "balances",
         "parameter": "bal"
@@ -828,7 +828,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer",
         "state_field": "total_supply",
         "parameter": "total_supply"
@@ -837,7 +837,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer",
         "state_field": "balances",
         "parameter": "balances"
@@ -846,7 +846,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer",
         "state_field": "balances",
         "parameter": "balances"
@@ -855,7 +855,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "grant",
         "state_field": null,
         "parameter": "amt"
@@ -864,7 +864,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "grant",
         "state_field": "grants",
         "parameter": "amt"
@@ -873,7 +873,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "pull",
         "state_field": null,
         "parameter": "amt"
@@ -882,7 +882,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "pull",
         "state_field": "balances",
         "parameter": "bal"
@@ -891,7 +891,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "pull",
         "state_field": "balances",
         "parameter": "balances"
@@ -900,7 +900,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "pull",
         "state_field": "grants",
         "parameter": "allowed"
@@ -909,7 +909,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer_from",
         "state_field": null,
         "parameter": "amt"
@@ -918,7 +918,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer_from",
         "state_field": "balances",
         "parameter": "bal"
@@ -927,7 +927,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer_from",
         "state_field": "balances",
         "parameter": "balances"
@@ -936,7 +936,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "transfer_from",
         "state_field": "grants",
         "parameter": "allowed"
@@ -945,7 +945,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "mint",
         "state_field": null,
         "parameter": "amt"
@@ -954,7 +954,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "mint",
         "state_field": "balances",
         "parameter": "balances"
@@ -963,7 +963,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "mint",
         "state_field": "total_supply",
         "parameter": "total_supply"
@@ -972,7 +972,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn_from",
         "state_field": null,
         "parameter": "amt"
@@ -981,7 +981,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn_from",
         "state_field": "balances",
         "parameter": "bal"
@@ -990,7 +990,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn_from",
         "state_field": "total_supply",
         "parameter": "total_supply"
@@ -999,7 +999,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn",
         "state_field": null,
         "parameter": "amt"
@@ -1008,7 +1008,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn",
         "state_field": "balances",
         "parameter": "bal"
@@ -1017,7 +1017,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "burn",
         "state_field": "total_supply",
         "parameter": "total_supply"
@@ -1026,7 +1026,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "set_max_tx_amount",
         "state_field": null,
         "parameter": "amt"
@@ -1035,7 +1035,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "set_max_wallet_amount",
         "state_field": null,
         "parameter": "amt"
@@ -1044,7 +1044,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "withdraw_tax",
         "state_field": "balances",
         "parameter": "bal"
@@ -1053,7 +1053,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "withdraw_tax",
         "state_field": "balances",
         "parameter": "balances"
@@ -1062,7 +1062,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "set_auto_burn_bps",
         "state_field": null,
         "parameter": "bps"
@@ -1071,7 +1071,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": null,
         "parameter": "initial_supply"
@@ -1080,7 +1080,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": null,
         "parameter": "max_supply"
@@ -1089,7 +1089,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": null,
         "parameter": "max_tx_amount"
@@ -1098,7 +1098,7 @@
         "severity": "error",
         "code": "signed_value_parameter",
         "message": "value-moving public parameter uses signed int",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": null,
         "parameter": "max_wallet_amount"
@@ -1107,7 +1107,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": "total_supply",
         "parameter": "initial_supply"
@@ -1116,7 +1116,7 @@
         "severity": "error",
         "code": "signed_value_flow",
         "message": "signed value can flow into value-like storage",
-        "program_name": "TokenV2",
+        "program_name": "Token",
         "function_name": "constructor",
         "state_field": "balances",
         "parameter": "initial_supply"

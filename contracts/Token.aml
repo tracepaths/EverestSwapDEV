@@ -1,10 +1,10 @@
-// [V7-FIX] TokenV2.aml - Full-feature fungible token
+// [V7-FIX] Token.aml - Full-feature fungible token
 // Replaces Token.aml. Supports: mintable, burnable, pausable, blacklist,
 // max-tx, max-wallet, cooldown, tax, auto-burn.
 //
 // Constructor takes 25 params. All admin functions are owner-only.
 
-contract TokenV2 {
+contract Token {
   state {
     name: string
     symbol: string
