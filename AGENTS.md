@@ -18,7 +18,7 @@ everestswapdev/
 
 - OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
 - WOCT: `octLtzi5z7Ls6BFdrBgdGQKiqBKxDPojpfHLpWhHfbDbF8c`
-- SwapPool: `oct8KN8bSHrNyBjRWt5GPY2RacS31Vwgr3Ga4ZXXGsJcGUe`
+- SwapPool: `octH8LDfDgQwZYumaSvu3fbdkm6uVNy3BAxJzqNHqsCGm4q`
 - SwapFactory: `octF2kc1Spgxo6BsUazFrg4gCYUMLffEPbcReg6SmmApa2F`
 - Router: `octAAy94fnLmCavamhcL3LVHB7pa2amxv9By53UqNGMLDgr`
 

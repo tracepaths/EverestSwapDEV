@@ -128,10 +128,27 @@ console.log('OES pool:', oesPool.result || oesPool);
 const allowance = await rpc('contract_call', [WOCT, 'allowance', [DEPLOYER, POOL], DEPLOYER]);
 console.log('WOCT allowance to pool:', allowance.result || allowance);
 
+// Step 0: Grant WOCT allowance to pool (required for pool to pull tokens)
+console.log('\n=== Step 0: Grant WOCT allowance to pool ===');
+const swapAmount = '500000'; // 0.5 WOCT
+const grantResult = await submitCall(DEPLOYER, WOCT, '0', nonce++, '100000', 'grant', [POOL, parseInt(swapAmount)], keypair, pubKeyB64);
+console.log('Grant submitted:', grantResult.tx_hash);
+// Wait for grant receipt
+for (let i = 0; i < 15; i++) {
+  await new Promise(r => setTimeout(r, 2000));
+  try {
+    const receipt = await rpc('contract_receipt', [grantResult.tx_hash]);
+    if (receipt && receipt.status !== 'pending') {
+      if (receipt.success) console.log('  Grant confirmed');
+      else console.log('  Grant failed:', receipt.error);
+      break;
+    }
+  } catch (e) {}
+}
+
 // Step 1: Execute SWAP - 0.5 WOCT → OES
 // [V7-FIX] Use chain epoch for deadline (not unix timestamp)
 console.log('\n=== Step 1: Swap 0.5 WOCT for OES ===');
-const swapAmount = '500000'; // 0.5 WOCT
 const minOut = '1'; // minimum OES to receive
 const epochInfoSwap = await rpc('epoch_current', []);
 const swapDeadline = (epochInfoSwap?.epoch_id || 0) + 300;

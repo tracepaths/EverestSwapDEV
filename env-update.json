@@ -13,8 +13,10 @@
   "finishedAt": "2026-06-30T19:14:51.652Z",
   "finishedBy": "finalize-redeploy.mjs",
   "factoryRegistration": {
-    "attempted": false,
-    "skipped": true,
-    "conflictingWithFactoryPair": true
+    "attempted": true,
+    "skipped": false,
+    "method": "update_pool",
+    "oldPool": "oct8KN8bSHrNyBjRWt5GPY2RacS31Vwgr3Ga4ZXXGsJcGUe",
+    "newPool": "octH8LDfDgQwZYumaSvu3fbdkm6uVNy3BAxJzqNHqsCGm4q"
   }
 }
