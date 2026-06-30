@@ -1,4 +1,4 @@
-contract SwapFactoryV2 {
+contract SwapFactory {
   state {
     pools: list[address]
     pool_count: int

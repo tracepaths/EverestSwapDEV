@@ -168,7 +168,7 @@ async function cmdView() {
     console.log('');
   }
 
-  // SwapFactoryV2
+  // SwapFactory
   if (d.SwapFactory) {
     console.log(`SwapFactory (${shortAddr(d.SwapFactory)}):`);
     const feeTo = await contractView(d.SwapFactory, 'get_fee_to', []);

@@ -120,7 +120,7 @@ async function main() {
   }
 
   console.log('╔══════════════════════════════════════════════════╗');
-  console.log('║       SwapFactoryV2 Redeploy                    ║');
+  console.log('║       SwapFactory Redeploy                      ║');
   console.log('╚══════════════════════════════════════════════════╝\n');
 
   const { keypair, address: deployerAddr } = getAddress(mnemonic);
@@ -141,13 +141,13 @@ async function main() {
   console.log(`Router: ${routerAddr}\n`);
 
   // 1. Compile
-  console.log('=== Compiling SwapFactoryV2 ===');
-  const factory = await compile('SwapFactoryV2');
+  console.log('=== Compiling SwapFactory ===');
+  const factory = await compile('SwapFactory');
 
   // 2. Deploy
-  console.log('\n=== Deploying SwapFactoryV2 ===');
+  console.log('\n=== Deploying SwapFactory ===');
   nonce++;
-  const newFactoryAddr = await deploy('SwapFactoryV2', factory.bytecode, deployerAddr, nonce, keypair.secretKey);
+  const newFactoryAddr = await deploy('SwapFactory', factory.bytecode, deployerAddr, nonce, keypair.secretKey);
 
   // 3. Register pool
   console.log('\n=== Registering Pool ===');

@@ -172,10 +172,10 @@ async function main() {
   let nonce = balanceInfo.nonce;
   console.log(`Starting nonce: ${nonce}\n`);
 
-  // ---- Step 1: Deploy SwapFactoryV2 ----
-  const factorySource = fs.readFileSync(path.join(CONTRACTS_DIR, 'SwapFactoryV2.aml'), 'utf-8');
+  // ---- Step 1: Deploy SwapFactory ----
+  const factorySource = fs.readFileSync(path.join(CONTRACTS_DIR, 'SwapFactory.aml'), 'utf-8');
   nonce++;
-  const factory = await deployContract('SwapFactoryV2', factorySource, deployerAddr, keypair.secretKey, nonce);
+  const factory = await deployContract('SwapFactory', factorySource, deployerAddr, keypair.secretKey, nonce);
   FACTORY_V2 = factory.address;
 
   // ---- Step 2: Add trusted tokens (OES, WOCT) ----
@@ -250,7 +250,7 @@ async function main() {
   console.log('\n========================================');
   console.log('=== Test Summary ===');
   console.log('========================================');
-  console.log(`  SwapFactoryV2: ${FACTORY_V2}`);
+  console.log(`  SwapFactory: ${FACTORY_V2}`);
   console.log(`  New Pool: ${pool.address}`);
   console.log(`  Tokens: WOCT(${WOCT}) + OES(${OES})`);
   console.log('  ✅ All tests passed!');

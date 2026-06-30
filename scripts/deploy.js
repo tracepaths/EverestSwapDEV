@@ -165,7 +165,7 @@ async function fullFreshDeploy(deployer, nonce) {
   }
 
   console.log('Compiling contracts...');
-  const swapFactory = await compile('SwapFactoryV2');
+  const swapFactory = await compile('SwapFactory');
   const woct = await compile('WOCT');
   const swapPool = await compile('SwapPool');
   const router = await compile('Router');
@@ -363,7 +363,7 @@ async function main() {
         break;
       }
       console.log('Recompiling SwapFactory...');
-      const swapFactory = await compile('SwapFactoryV2');
+      const swapFactory = await compile('SwapFactory');
       console.log('\nRedeploying SwapFactory...');
       currentNonce++;
       addresses.SwapFactory = await deploy('SwapFactory', swapFactory.bytecode, deployer.address, currentNonce, deployer.keypair.secretKey);
@@ -406,7 +406,7 @@ async function main() {
       console.log('from current wallet, then re-registers existing WOCT/OES pool.\n');
 
       console.log('Recompiling SwapFactory + Router...');
-      const swapFactory = await compile('SwapFactoryV2');
+      const swapFactory = await compile('SwapFactory');
       const router = await compile('Router');
 
       console.log('\nDeploying SwapFactory...');

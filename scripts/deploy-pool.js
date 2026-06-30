@@ -106,9 +106,9 @@ async function main() {
   let currentNonce = nonce;
   const OES = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
 
-  // 1. Compile and deploy new SwapFactoryV2 with update_pool
-  console.log('1. Compiling SwapFactoryV2...');
-  const factorySrc = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'SwapFactoryV2.aml'), 'utf-8');
+  // 1. Compile and deploy new SwapFactory with update_pool
+  console.log('1. Compiling SwapFactory...');
+  const factorySrc = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'SwapFactory.aml'), 'utf-8');
   const factoryCompiled = await rpcCall('octra_compileAml', [factorySrc]);
   console.log(`   ${factoryCompiled.size}B, ${factoryCompiled.instructions} instr`);
 
@@ -116,7 +116,7 @@ async function main() {
   const factoryAddr = await rpcCall('octra_computeContractAddress', [factoryCompiled.bytecode, deployer.address, currentNonce]);
   console.log(`   Predicted: ${factoryAddr.address}`);
 
-  console.log('\n2. Deploying SwapFactoryV2...');
+  console.log('\n2. Deploying SwapFactory...');
   await submitTx(deployer.address, factoryAddr.address, '0', currentNonce, FEE_OU, Date.now() / 1000,
     'deploy', factoryCompiled.bytecode, null, deployer.keypair.secretKey);
   addresses.SwapFactory = factoryAddr.address;

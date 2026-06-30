@@ -1,5 +1,5 @@
 // DEPRECATED: SwapFactory.aml is unsafe - returns pools[0] for all pairs
-// Use SwapFactoryV2.aml instead. This file kept for reference only.
+// Use SwapFactory.aml instead. This file kept for reference only.
 // DO NOT DEPLOY - see security audit V7-CRIT-3
 
 contract SwapFactory {
@@ -40,7 +40,7 @@ contract SwapFactory {
 
   view fn get_pool(token_a: address, token_b: address): address {
     // [DEPRECATED] This returns pools[0] for ALL pairs - UNSAFE!
-    // Use SwapFactoryV2.get_pool() instead which properly maps pairs
+    // Use SwapFactory.get_pool() instead which properly maps pairs
     if self.pool_count == 0 {
       return ""
     }
