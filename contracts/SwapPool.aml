@@ -34,6 +34,8 @@ contract SwapPool {
     max_positions_per_user: int
     // [SECURITY] Incremental total locked LP for O(1) view
     total_locked_lp: int
+    // [S1-SP-02] Max initial price ratio (e.g., 100 = max 100:1 or 1:100)
+    max_initial_price_ratio: int
   }
 
   event Swap(who: address, token_in: address, amount_in: int, amount_out: int)
@@ -78,6 +80,8 @@ contract SwapPool {
     self.max_positions_per_user = 100
     // [SECURITY] Incremental total locked LP tracking
     self.total_locked_lp = 0
+    // [S1-SP-02] Default max initial price ratio: 100 (max 100:1 or 1:100)
+    self.max_initial_price_ratio = 100
   }
 
   // [V2-AUDIT-FIX V2-LOW-1] set_tokens: guard against re-initialization by checking that
@@ -174,13 +178,30 @@ contract SwapPool {
       // (call returns false) if initial ratio diverges beyond tolerance.
       require(call(self.factory, "validate_initial_price", [self.token_a, self.token_b, amount_a, amount_b]), "equilibrium price check failed")
 
+      // [S1-SP-02] Initial price ratio bounds — prevent extreme price manipulation
+      // Price ratio = amount_a / amount_b (or inverse). Must be within [1/max, max].
+      if self.max_initial_price_ratio > 0 {
+        // Check amount_a/amount_b <= max AND amount_b/amount_a <= max
+        // Equivalent to: amount_a <= amount_b * max AND amount_b <= amount_a * max
+        require(amount_a <= amount_b * self.max_initial_price_ratio, "initial price ratio too high")
+        require(amount_b <= amount_a * self.max_initial_price_ratio, "initial price ratio too low")
+      }
+
       // [V7-CRIT-1] Now safe to pull tokens — all validations have passed
+      // [S1-SP-01] Fee-on-transfer: measure actual received amount via balance-before/after
+      let bal_a_before = call(self.token_a, "balance_of", [self_addr])
       require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+      let bal_a_after = call(self.token_a, "balance_of", [self_addr])
+      let actual_a = bal_a_after - bal_a_before
+
+      let bal_b_before = call(self.token_b, "balance_of", [self_addr])
       require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
+      let bal_b_after = call(self.token_b, "balance_of", [self_addr])
+      let actual_b = bal_b_after - bal_b_before
 
       // [V2-AUDIT-FIX V2-CRIT-1] CEI: all state changes before any external calls
-      self.reserve_a = amount_a
-      self.reserve_b = amount_b
+      self.reserve_a = actual_a
+      self.reserve_b = actual_b
       self.total_lp = lp_raw  // total including burned portion
       self.total_liquidity = lp
 
@@ -245,12 +266,24 @@ contract SwapPool {
     let refund_b = amount_b - used_b
 
     // [V7-CRIT-1] Now safe to pull tokens — all validations have passed
+    // [S1-SP-01] Fee-on-transfer: measure actual received amount
+    let bal_a_before = call(self.token_a, "balance_of", [self_addr])
     require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+    let bal_a_after = call(self.token_a, "balance_of", [self_addr])
+    let actual_a = bal_a_after - bal_a_before
+
+    let bal_b_before = call(self.token_b, "balance_of", [self_addr])
     require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
+    let bal_b_after = call(self.token_b, "balance_of", [self_addr])
+    let actual_b = bal_b_after - bal_b_before
+
+    // Use actual received amounts for reserve accounting
+    require(actual_a >= used_a, "token_a fee-on-transfer: received less than used")
+    require(actual_b >= used_b, "token_b fee-on-transfer: received less than used")
 
     // [V2-AUDIT-FIX V2-CRIT-1] CEI: update state BEFORE any external calls
-    self.reserve_a += used_a
-    self.reserve_b += used_b
+    self.reserve_a += actual_a
+    self.reserve_b += actual_b
     self.total_lp += lp_amount
     self.total_liquidity += lp_amount
 
@@ -511,16 +544,21 @@ contract SwapPool {
     self.locked = true
 
     // [V7-CRIT-1] Validate pull succeeded
+    // [S1-SP-03] Fee-on-transfer: measure actual received amount
+    let bal_before = call(self.token_a, "balance_of", [self_addr])
     require(call(self.token_a, "pull", [caller, self_addr, amount_in]), "token_a pull failed")
+    let bal_after = call(self.token_a, "balance_of", [self_addr])
+    let actual_in = bal_after - bal_before
+    require(actual_in > 0, "zero tokens received (fee-on-transfer)")
 
     // [SECURITY] H-2: Overflow guard for fee calculation
-    // amount_in * fee_numerator can overflow int64. Check by dividing back.
-    let raw_fee = amount_in * self.fee_numerator
+    // actual_in * fee_numerator can overflow int64. Check by dividing back.
+    let raw_fee = actual_in * self.fee_numerator
     if self.fee_numerator > 0 {
-      require(raw_fee / self.fee_numerator == amount_in, "fee amount overflow")
+      require(raw_fee / self.fee_numerator == actual_in, "fee amount overflow")
     }
     let fee_amount = raw_fee / self.fee_denominator
-    let amount_in_after_fee = amount_in - fee_amount
+    let amount_in_after_fee = actual_in - fee_amount
 
     // [SECURITY] H-10: Overflow guard for out calculation
     // amount_in_after_fee * reserve_b can overflow
@@ -584,15 +622,20 @@ contract SwapPool {
     self.locked = true
 
     // [V7-CRIT-1] Validate pull succeeded
+    // [S1-SP-03] Fee-on-transfer: measure actual received amount
+    let bal_before = call(self.token_b, "balance_of", [self_addr])
     require(call(self.token_b, "pull", [caller, self_addr, amount_in]), "token_b pull failed")
+    let bal_after = call(self.token_b, "balance_of", [self_addr])
+    let actual_in = bal_after - bal_before
+    require(actual_in > 0, "zero tokens received (fee-on-transfer)")
 
     // [SECURITY] H-2: Overflow guard for fee calculation
-    let raw_fee = amount_in * self.fee_numerator
+    let raw_fee = actual_in * self.fee_numerator
     if self.fee_numerator > 0 {
-      require(raw_fee / self.fee_numerator == amount_in, "fee amount overflow")
+      require(raw_fee / self.fee_numerator == actual_in, "fee amount overflow")
     }
     let fee_amount = raw_fee / self.fee_denominator
-    let amount_in_after_fee = amount_in - fee_amount
+    let amount_in_after_fee = actual_in - fee_amount
 
     // [SECURITY] H-10: Overflow guard for out calculation
     let raw_out = amount_in_after_fee * self.reserve_a
@@ -707,6 +750,16 @@ contract SwapPool {
       self.active = status
       emit PoolActivated(status)
     }
+    return true
+  }
+
+  // [S1-SP-02] Set maximum initial price ratio (owner only)
+  // Ratio of 100 means max 100:1 or 1:100. Set to 0 to disable check.
+  fn set_max_initial_price_ratio(ratio: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(ratio >= 0, "ratio cannot be negative")
+    self.max_initial_price_ratio = ratio
     return true
   }
 

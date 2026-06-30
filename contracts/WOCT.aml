@@ -49,8 +49,8 @@ contract WOCT {
     self.decimals = 6
     self.owner = origin
     self.paused = false
-    // [AUDIT-FIX NEW-21] Default: no limit (0 = unlimited)
-    self.max_deposit_per_tx = 0
+    // [S1-WOCT-02] Default: 100M OCT per tx (100000000000000 = 100M * 10^6)
+    self.max_deposit_per_tx = 100000000000000
     // [V2-AUDIT-FIX V2-LOW-2] No pending owner at construction
     self.pending_owner = ""
     // [AUDIT-FIX] No reentrancy lock at construction

@@ -10,6 +10,11 @@ contract Router {
     max_slippage_bps: int
     // [V7-CRIT-8] Two-step ownership transfer
     pending_owner: address
+    // [S1-RT-01] Timelock for factory/woct changes (24h = 14400 epochs)
+    pending_factory: address
+    pending_woct: address
+    pending_factory_epoch: int
+    pending_woct_epoch: int
   }
 
   event SwapExact(who: address, token_in: address, token_out: address, amount_in: int, amount_out: int)
@@ -22,6 +27,11 @@ contract Router {
   event OwnershipTransferred(old_owner: address, new_owner: address)
   // [SECURITY] M-9: Event for max slippage updates
   event MaxSlippageBpsSet(old_bps: int, new_bps: int)
+  // [S1-RT-01] Timelock events for factory/woct changes
+  event FactoryChangeProposed(old_factory: address, new_factory: address, effective_epoch: int)
+  event FactoryChanged(old_factory: address, new_factory: address)
+  event WoctChangeProposed(old_woct: address, new_woct: address, effective_epoch: int)
+  event WoctChanged(old_woct: address, new_woct: address)
 
   constructor() {
     self.factory = origin
@@ -33,21 +43,72 @@ contract Router {
     self.max_slippage_bps = 5000
     // [V7-CRIT-8] Two-step ownership: no pending owner at start
     self.pending_owner = ""
+    // [S1-RT-01] No pending factory/woct changes at start
+    self.pending_factory = ""
+    self.pending_woct = ""
+    self.pending_factory_epoch = 0
+    self.pending_woct_epoch = 0
   }
 
-  fn set_factory(addr: address): bool {
+  // [S1-RT-01] Factory change with 24h timelock
+  fn propose_factory(addr: address): bool {
     require(caller == self.owner, "not authorized")
     assert_address(addr)
     require(addr != "", "zero address")
-    self.factory = addr
+    require(addr != self.factory, "same address")
+    self.pending_factory = addr
+    self.pending_factory_epoch = epoch + 14400
+    emit FactoryChangeProposed(self.factory, addr, self.pending_factory_epoch)
     return true
   }
 
-  fn set_woct(addr: address): bool {
+  fn accept_factory(): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.pending_factory != "", "no pending change")
+    require(epoch >= self.pending_factory_epoch, "timelock not elapsed")
+    let old = self.factory
+    self.factory = self.pending_factory
+    self.pending_factory = ""
+    self.pending_factory_epoch = 0
+    emit FactoryChanged(old, self.factory)
+    return true
+  }
+
+  fn cancel_factory_change(): bool {
+    require(caller == self.owner, "not authorized")
+    self.pending_factory = ""
+    self.pending_factory_epoch = 0
+    return true
+  }
+
+  // [S1-RT-01] WOCT change with 24h timelock
+  fn propose_woct(addr: address): bool {
     require(caller == self.owner, "not authorized")
     assert_address(addr)
     require(addr != "", "zero address")
-    self.woct = addr
+    require(addr != self.woct, "same address")
+    self.pending_woct = addr
+    self.pending_woct_epoch = epoch + 14400
+    emit WoctChangeProposed(self.woct, addr, self.pending_woct_epoch)
+    return true
+  }
+
+  fn accept_woct(): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.pending_woct != "", "no pending change")
+    require(epoch >= self.pending_woct_epoch, "timelock not elapsed")
+    let old = self.woct
+    self.woct = self.pending_woct
+    self.pending_woct = ""
+    self.pending_woct_epoch = 0
+    emit WoctChanged(old, self.woct)
+    return true
+  }
+
+  fn cancel_woct_change(): bool {
+    require(caller == self.owner, "not authorized")
+    self.pending_woct = ""
+    self.pending_woct_epoch = 0
     return true
   }
 
