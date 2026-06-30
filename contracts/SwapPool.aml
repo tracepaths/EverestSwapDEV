@@ -131,6 +131,13 @@ contract SwapPool {
     let is_first = self.total_lp == 0
 
     if is_first {
+      // [V8-SECURITY] Only the pool owner can seed initial liquidity. Without
+      // this guard, anyone could front-run the first add_liquidity and lock in
+      // an arbitrary price ratio (including ones that trip the equilibrium
+      // guard, drain the LP via donation, or set a price that benefits only the
+      // attacker). Subsequent proportional add_liquidity remains permissionless.
+      require(caller == self.owner, "not authorized")
+
       // [AUDIT-FIX CRIT-2] Use geometric mean (sqrt) instead of direct product
       // [SECURITY] M-6: Overflow guard — detect if amount_a * amount_b overflows.
       // After the multiplication, divide back: if product / amount_a != amount_b,
