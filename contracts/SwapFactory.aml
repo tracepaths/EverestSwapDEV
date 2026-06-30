@@ -424,11 +424,11 @@ contract SwapFactory {
     require(pool != "" && pool != "0", "no pool for token")
 
     // Get voter's locked LP in this pool
-    let locked_lp = int(call(pool, "get_locked_liquidity", [caller]))
+    let locked_lp = call(pool, "get_locked_liquidity", [caller])
     require(locked_lp > 0, "no locked LP")
 
     // Cap at 5% of total locked LP
-    let total_locked = int(call(pool, "get_total_locked_lp", []))
+    let total_locked = call(pool, "get_total_locked_lp", [])
     let max_vote = total_locked / 20
     let vote_weight = locked_lp
     if vote_weight > max_vote {

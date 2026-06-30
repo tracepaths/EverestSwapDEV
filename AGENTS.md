@@ -17,10 +17,10 @@ everestswapdev/
 ## Contract Addresses (V6 — Devnet)
 
 - OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
-- WOCT: `octE7bttbCKJLQskNzHs8MiqCXDjuF2k1JdADv44axxA8LK`
-- SwapPool: `octFh3NNUj2JmAorPcrLfcy4bzf5tdk88qDCdFnmjHt12X3`
-- SwapFactory: `octFmVqADVjj8v1WSr4ex6EJd2TPRf1JjUVHb3tK29YTXTV`
-- Router: `octFxNmmEQ9VbnefP9zGGhyPexsWnU7CnHMTB3vxPubNyZG`
+- WOCT: `octLtzi5z7Ls6BFdrBgdGQKiqBKxDPojpfHLpWhHfbDbF8c`
+- SwapPool: `oct8KN8bSHrNyBjRWt5GPY2RacS31Vwgr3Ga4ZXXGsJcGUe`
+- SwapFactory: `octF2kc1Spgxo6BsUazFrg4gCYUMLffEPbcReg6SmmApa2F`
+- Router: `octAAy94fnLmCavamhcL3LVHB7pa2amxv9By53UqNGMLDgr`
 
 ## RPC Endpoints
 
