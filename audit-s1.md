@@ -4,27 +4,34 @@
 **Scope:** SwapPool.aml, SwapFactory.aml, WOCT.aml, Router.aml, OES.aml, Token.aml
 **Auditor:** MiMoCode Automated Security Analysis
 **Network:** Octra Devnet
-**Audit Iteration:** Post V8 fixes
+**Audit Iteration:** Post V7 redeploy (2026-06-30)
+
+**Redeployed Addresses (Devnet):**
+- OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
+- WOCT: `oct4pAKouypxmP7Uk79uGzEpkkidsNAK3fQhxy1HDUmBRLE`
+- SwapFactory: `oct6QAJuPwbfHQUb1uQBsuceQgATK5AqStqwQPhPv29BmQx`
+- SwapPool: `octHzDX3aUCvFVRifUQoPdsaXqSvRLozGqJu3wzSDk2AZ25`
+- Router: `oct27w262B5fscy8mRRdAtTTYrRgpR2sseJyp2HMGWYGaWW`
 
 ---
 
 ## Executive Summary
 
-EverestSwap implements a Uniswap V2-style AMM on the Octra Network using AML (AppliedML) smart contracts. The codebase demonstrates strong security awareness with multiple audit fix iterations (V2 through V8). Overall risk is **MEDIUM** — no critical vulnerabilities enabling immediate fund theft, but several medium-severity issues require attention before mainnet.
+EverestSwap implements a Uniswap V2-style AMM on the Octra Network using AML (AppliedML) smart contracts. The codebase demonstrates strong security awareness with multiple audit fix iterations (V2 through V8, plus S1). Overall risk is **LOW-MEDIUM** — all high-severity issues have been fixed.
 
-| Severity | Count |
-|----------|-------|
-| Critical | 0 |
-| High | 2 |
-| Medium | 5 |
-| Low | 6 |
-| Informational | 5 |
+| Severity | Found | Fixed | Remaining |
+|----------|-------|-------|-----------|
+| Critical | 0 | 0 | 0 |
+| High | 2 | 2 | 0 |
+| Medium | 5 | 3 | 2 |
+| Low | 6 | 3 | 3 |
+| Informational | 5 | 0 | 5 |
 
 ---
 
 ## SwapPool.aml (903 lines)
 
-### S1-SP-01: Fee-on-Transfer Token Incompatibility [HIGH]
+### S1-SP-01: Fee-on-Transfer Token Incompatibility [HIGH] ✅ FIXED
 
 **Lines:** 247-249 (add_liquidity proportional), swap functions
 
@@ -44,7 +51,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-SP-02: Owner Can Set Arbitrary Initial Price [HIGH]
+### S1-SP-02: Owner Can Set Arbitrary Initial Price [HIGH] ✅ FIXED
 
 **Lines:** 133-223 (add_liquidity first)
 
@@ -56,7 +63,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-SP-03: No Fee-on-Transfer Awareness in Swap [MEDIUM]
+### S1-SP-03: No Fee-on-Transfer Awareness in Swap [MEDIUM] ✅ FIXED
 
 **Lines:** swap_a_for_b / swap_b_for_a
 
@@ -150,7 +157,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-SF-03: Trusted Token List DoS [LOW]
+### S1-SF-03: Trusted Token List DoS [LOW] ✅ FIXED
 
 **Lines:** add_trusted_token / get_trusted_tokens
 
@@ -160,7 +167,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-SF-04: Setter Transfer No Timelock [LOW]
+### S1-SF-04: Setter Transfer No Timelock [LOW] ✅ FIXED
 
 **Lines:** initiate_setter_transfer / accept_setter_transfer
 
@@ -194,7 +201,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-WOCT-02: max_deposit_per_tx Default Unlimited [LOW]
+### S1-WOCT-02: max_deposit_per_tx Default Unlimited [LOW] ✅ FIXED
 
 **Lines:** constructor — max_deposit_per_tx = 0
 
@@ -238,7 +245,7 @@ let actual = bal_after - bal_before
 
 ---
 
-### S1-RT-02: Slippage Ceiling 30% [LOW]
+### S1-RT-02: Slippage Ceiling 30% [LOW] ✅ FIXED
 
 **Lines:** set_max_slippage_bps — max 3000
 

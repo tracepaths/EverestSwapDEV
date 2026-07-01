@@ -50,6 +50,19 @@ contract Router {
     self.pending_woct_epoch = 0
   }
 
+  // [DEPLOY] One-time initialization for fresh deploys (bypasses timelock)
+  fn init(factory_addr: address, woct_addr: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.factory == origin, "already initialized")
+    assert_address(factory_addr)
+    assert_address(woct_addr)
+    require(factory_addr != "", "zero factory")
+    require(woct_addr != "", "zero woct")
+    self.factory = factory_addr
+    self.woct = woct_addr
+    return true
+  }
+
   // [S1-RT-01] Factory change with 24h timelock
   fn propose_factory(addr: address): bool {
     require(caller == self.owner, "not authorized")
@@ -143,9 +156,8 @@ contract Router {
   // [AUDIT-FIX NEW-35] Set max slippage (in bps)
   fn set_max_slippage_bps(bps: int): bool {
     require(caller == self.owner, "not authorized")
-    // [SECURITY] M-9: Lower max from 9999 (99.99%) to 3000 (30%) — high slippage is
-    // dangerous and should be reserved for emergency recovery
-    require(bps > 0 && bps <= 3000, "invalid slippage bps (max 30%)")
+    // [S1-RT-02] Lower max to 1000 (10%) — high slippage exploitable in low-liquidity pools
+    require(bps > 0 && bps <= 1000, "invalid slippage bps (max 10%)")
     let old_bps = self.max_slippage_bps
     self.max_slippage_bps = bps
     // [SECURITY] M-9: Emit event for transparency
@@ -217,30 +229,21 @@ contract Router {
     let balance_after = call(token_in, "balance_of", [self_addr])
     require(balance_after >= balance_before + amount_in, "token pull did not increase router balance (possible malicious token)")
 
-    // Grant token_in ke pool
-    require(call(token_in, "grant", [pool_addr, amount_in]), "token grant failed")
-
+    // Pool's swap pulls from caller (Router). Router has tokens from step 1.
+    // Pool sends output to caller (Router). Router forwards to recipient.
     let amount_out = 0
-
     if is_a_to_b {
-      // token_in adalah token_a → swap_a_for_b
       amount_out = call(pool_addr, "swap_a_for_b", [amount_in, min_out, deadline])
     } else {
-      // token_in adalah token_b → swap_b_for_a
       amount_out = call(pool_addr, "swap_b_for_a", [amount_in, min_out, deadline])
     }
 
     require(amount_out >= min_out, "insufficient output")
-    // [AUDIT-FIX NEW-39] Validasi amount_out > 0
     require(amount_out > 0, "zero output")
 
-    // [V2-MED-6] Transfer output tokens to recipient.
-    // [SECURITY] H-6: Reject recipient == self_addr instead of silently redirecting
-    // to the caller. Silent redirect could be used by integrating contracts to lose
-    // output tokens to the wrong address.
+    // Pool sent token_out to Router. Forward to recipient.
     require(to != self_addr, "recipient cannot be router")
-    let recipient = to
-    require(call(token_out, "transfer", [recipient, amount_out]), "output transfer failed")
+    require(call(token_out, "transfer", [to, amount_out]), "output transfer failed")
 
     emit SwapExact(caller, token_in, token_out, amount_in, amount_out)
     return amount_out

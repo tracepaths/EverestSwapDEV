@@ -14,13 +14,13 @@ everestswapdev/
 - **Frontend**: `tracepaths/EverestSwap` (React + Vite app)
 - **Backend**: `tracepaths/EverestSwapDEV` (this repo — contracts, scripts, deployment)
 
-## Contract Addresses (V6 — Devnet)
+## Contract Addresses (V7 — Devnet, Redeployed 2026-06-30)
 
-- OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
-- WOCT: `octLtzi5z7Ls6BFdrBgdGQKiqBKxDPojpfHLpWhHfbDbF8c`
-- SwapPool: `octH8LDfDgQwZYumaSvu3fbdkm6uVNy3BAxJzqNHqsCGm4q`
-- SwapFactory: `octF2kc1Spgxo6BsUazFrg4gCYUMLffEPbcReg6SmmApa2F`
-- Router: `octAAy94fnLmCavamhcL3LVHB7pa2amxv9By53UqNGMLDgr`
+- OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD` (unchanged)
+- WOCT: `oct4pAKouypxmP7Uk79uGzEpkkidsNAK3fQhxy1HDUmBRLE`
+- SwapPool: `octHzDX3aUCvFVRifUQoPdsaXqSvRLozGqJu3wzSDk2AZ25`
+- SwapFactory: `oct6QAJuPwbfHQUb1uQBsuceQgATK5AqStqwQPhPv29BmQx`
+- Router: `oct27w262B5fscy8mRRdAtTTYrRgpR2sseJyp2HMGWYGaWW`
 
 ## RPC Endpoints
 
@@ -116,9 +116,9 @@ Ed25519 keypair → SHA256(pubkey) → Base58 → "oct"+b58 (47 chars)
 
 - **OES.aml** — ERC20-like token (OCS01 standard). 666M supply. `transfer`, `grant`, `pull`, `balance_of`, `allowance`.
 - **WOCT.aml** — Wrapped OCT. `deposit()` (payable, mints WOCT 1:1), `withdraw(amt)` (burns WOCT, sends OCT via `transfer()`), plus full IOCS01 interface.
-- **SwapPool.aml** — AMM with x*y=k, 0.3% fee. Uses `call()` for token pulls. No native OCT handling.
-- **SwapFactory.aml** — Pool registry. `register_pool(addr)` is **permissionless** (anyone can register). `get_pool()` for address lookup.
-- **Router.aml** — `swap_exact_tokens_for_tokens(amountIn, minOut, recipient)` — pulls tokens from caller, looks up pool via factory, executes swap.
+- **SwapPool.aml** — AMM with x*y=k, 0.3% fee (max 1%). Fee-on-transfer safe (balance-before/after). Initial price ratio capped at 100:1. Position-based LP tracking.
+- **SwapFactory.aml** — Pool registry. `register_pool(addr)` is **permissionless**. Setter transfer has 24h timelock. Trusted token list capped at 100.
+- **Router.aml** — `swap_exact_tokens_for_tokens(amountIn, minOut, recipient)` — max slippage 10%. Factory/WOCT address changes have 24h timelock.
 
 ## Token Grant/Pull Pattern
 
@@ -142,3 +142,7 @@ node scripts/test-swap.js           # Test swap flow
 - `ou` is max fee; actual cost may be lower (effort * gas price)
 - Frontend uses token addresses from `types/index.ts` — update when redeploying
 - NEVER commit deployer mnemonics or private keys to git
+- **Timestamps MUST be floats** — integer timestamps cause "invalid signature" errors
+- **Fee-on-transfer tokens** are safe — pool uses balance-before/after pattern
+- **Max slippage** is 10% (1000 bps) on Router
+- **Setter transfer** on Factory has 24h timelock

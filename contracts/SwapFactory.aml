@@ -14,6 +14,7 @@ contract SwapFactory {
     trusted_tokens: map[address]bool
     trusted_list: list[address]
     pending_setter: address
+    pending_setter_epoch: int
     paused: bool
     trusted_removed: map[address]bool
     // [SECURITY] Track position of each trusted token in the list for O(1) swap-pop on remove
@@ -118,6 +119,8 @@ contract SwapFactory {
     require(_setter != "", "zero address")
     require(_setter != self.fee_to_setter, "same setter")
     self.pending_setter = _setter
+    // [S1-SF-04] Add 24h timelock (14400 epochs)
+    self.pending_setter_epoch = epoch + 14400
     emit SetterTransferInitiated(self.fee_to_setter, _setter)
     return true
   }
@@ -125,9 +128,12 @@ contract SwapFactory {
   fn accept_setter_transfer(): bool {
     require(caller == self.pending_setter, "not pending setter")
     require(self.pending_setter != "", "no pending transfer")
+    // [S1-SF-04] Enforce 24h timelock
+    require(epoch >= self.pending_setter_epoch, "timelock not elapsed")
     let old_setter = self.fee_to_setter
     self.fee_to_setter = self.pending_setter
     self.pending_setter = ""
+    self.pending_setter_epoch = 0
     emit SetterTransferred(old_setter, self.fee_to_setter)
     return true
   }
@@ -138,6 +144,8 @@ contract SwapFactory {
     // [SECURITY] H-3: Explicit zero-address check for clarity
     require(token != "", "zero token address")
     require(!self.trusted_tokens[token], "already trusted")
+    // [S1-SF-03] Cap trusted list at 100 to prevent DoS
+    require(len(self.trusted_list) < 100, "trusted list full (max 100)")
     self.trusted_tokens[token] = true
     self.trusted_removed[token] = false
     // [SECURITY] Only push to list if not already present (avoids duplicates)

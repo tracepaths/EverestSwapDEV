@@ -36,6 +36,10 @@ contract SwapPool {
     total_locked_lp: int
     // [S1-SP-02] Max initial price ratio (e.g., 100 = max 100:1 or 1:100)
     max_initial_price_ratio: int
+    // [SECURITY] TWAP oracle — cumulative price for manipulation-resistant pricing
+    twap_price_cumulative_a: int
+    twap_price_cumulative_b: int
+    twap_last_update_epoch: int
   }
 
   event Swap(who: address, token_in: address, amount_in: int, amount_out: int)
@@ -604,6 +608,18 @@ contract SwapPool {
     // [V7-CRIT-1] Validate transfer succeeded
     require(call(self.token_b, "transfer", [caller, out]), "token_b transfer failed")
 
+    // [SECURITY] Update TWAP before emitting events
+    if self.twap_last_update_epoch > 0 && self.reserve_a > 0 && self.reserve_b > 0 {
+      let twap_elapsed = epoch - self.twap_last_update_epoch
+      if twap_elapsed > 0 {
+        let twap_price_a = self.reserve_b * 1000000 / self.reserve_a
+        let twap_price_b = self.reserve_a * 1000000 / self.reserve_b
+        self.twap_price_cumulative_a += twap_price_a * twap_elapsed
+        self.twap_price_cumulative_b += twap_price_b * twap_elapsed
+      }
+    }
+    self.twap_last_update_epoch = epoch
+
     self.locked = false
     emit Swap(caller, self.token_a, amount_in, out)
     emit Sync(self.reserve_a, self.reserve_b)
@@ -673,10 +689,56 @@ contract SwapPool {
     // [V7-CRIT-1] Validate transfer succeeded
     require(call(self.token_a, "transfer", [caller, out]), "token_a transfer failed")
 
+    // [SECURITY] Update TWAP before emitting events
+    if self.twap_last_update_epoch > 0 && self.reserve_a > 0 && self.reserve_b > 0 {
+      let twap_elapsed = epoch - self.twap_last_update_epoch
+      if twap_elapsed > 0 {
+        let twap_price_a = self.reserve_b * 1000000 / self.reserve_a
+        let twap_price_b = self.reserve_a * 1000000 / self.reserve_b
+        self.twap_price_cumulative_a += twap_price_a * twap_elapsed
+        self.twap_price_cumulative_b += twap_price_b * twap_elapsed
+      }
+    }
+    self.twap_last_update_epoch = epoch
+
     self.locked = false
     emit Swap(caller, self.token_b, amount_in, out)
     emit Sync(self.reserve_a, self.reserve_b)
     return out
+  }
+
+  // [SECURITY] TWAP view — returns time-weighted average price
+  view fn get_twap(): (int, int) {
+    if self.twap_last_update_epoch == 0 || self.reserve_a == 0 || self.reserve_b == 0 {
+      return (0, 0)
+    }
+    let elapsed = epoch - self.twap_last_update_epoch
+    if elapsed == 0 { elapsed = 1 }
+    let avg_a = self.twap_price_cumulative_a / elapsed
+    let avg_b = self.twap_price_cumulative_b / elapsed
+    return (avg_a, avg_b)
+  }
+
+  // [SECURITY] Rescue stuck tokens — only excess beyond tracked reserves
+  fn rescue_tokens(token: address, amount: int, to: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(token != "", "zero token address")
+    require(to != "", "zero recipient")
+    require(amount > 0, "zero amount")
+    // Calculate tracked balance (reserves + fees for both tokens)
+    let tracked = 0
+    if token == self.token_a {
+      tracked = self.reserve_a + self.fee_reserve_a
+    } else if token == self.token_b {
+      tracked = self.reserve_b + self.fee_reserve_b
+    }
+    let actual_bal = call(token, "balance_of", [self_addr])
+    require(actual_bal > tracked, "no excess tokens to rescue")
+    let rescueable = actual_bal - tracked
+    require(amount <= rescueable, "amount exceeds rescueable balance")
+    require(call(token, "transfer", [to, amount]), "rescue transfer failed")
+    return true
   }
 
   fn sync(): bool {
