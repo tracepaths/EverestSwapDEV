@@ -28,6 +28,8 @@ contract SwapFactory {
     token_votes: map[address]int              // token -> total vote weight
     voter_has_voted: map[address]map[address]bool  // voter -> token -> voted
     voter_weight: map[address]map[address]int      // voter -> token -> vote weight used
+    // [SECURITY] MEDIUM-8: Reentrancy guard for functions with external calls
+    locked: bool
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
@@ -56,6 +58,8 @@ contract SwapFactory {
     // [ARCH] Equilibrium guard defaults: no hub (disabled), 1% tolerance
     self.hub_token = ""
     self.price_tolerance_bps = 100
+    // [SECURITY] MEDIUM-8: Initialize reentrancy guard
+    self.locked = false
   }
 
   fn set_paused(status: bool): bool {
@@ -197,6 +201,11 @@ contract SwapFactory {
     assert_address(token_a)
     assert_address(token_b)
     require(self.pool_token_pair[pool] == "" || self.pool_token_pair[pool] == "0", "pool already registered")
+
+    // [SECURITY] HIGH-1: Verify the new pool is a genuine initialized SwapPool for this
+    // exact pair. Prevents fee_to_setter from replacing a pool with one that has different tokens.
+    require(call(pool, "get_token_a", []) == token_a, "new pool token_a mismatch")
+    require(call(pool, "get_token_b", []) == token_b, "new pool token_b mismatch")
 
     let old_pool = self.pools_by_pair[token_a][token_b]
     if old_pool == "" || old_pool == "0" {
@@ -423,6 +432,9 @@ contract SwapFactory {
     assert_address(token)
     require(token != "", "zero token address")
     require(token != self.hub_token, "cannot vote on hub token")
+    // [SECURITY] MEDIUM-8: Add reentrancy guard for external calls
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
 
     // Find pool for token/hub pair
     let pool = self.pools_by_pair[token][self.hub_token]
@@ -453,6 +465,7 @@ contract SwapFactory {
     self.voter_has_voted[caller][token] = true
     self.voter_weight[caller][token] = vote_weight
     self.token_votes[token] = self.token_votes[token] + vote_weight
+    self.locked = false
     emit TokenVoted(token, caller, vote_weight)
     return true
   }

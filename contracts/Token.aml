@@ -598,10 +598,11 @@ contract Token {
   }
 
   // [V7-PASS9] H-15: get_trusted_count helper
-  // AML list length tracked separately since `len()` may not be available for all types
+  // [BUGFIX] Updated comment to clearly document this is a placeholder.
+  // AML doesn't support dynamic list tracking efficiently. Callers should use
+  // TrustedUpdated events to track trusted address count off-chain.
   view fn get_trusted_count(): int {
-    // Approximation: count via iteration. Caller should be aware this is O(n).
-    // For performance, the off-chain indexer uses events instead.
+    // PLACEHOLDER: Always returns 0. Use TrustedUpdated events for actual count.
     return 0
   }
 
@@ -661,6 +662,9 @@ contract Token {
     require(caller == self.owner, "not owner")
     assert_address(to)
     require(to != "", "withdraw to zero")
+    // [SECURITY] MEDIUM-6: Add reentrancy guard for consistency with other state-changing functions
+    require(!self.locked, "reentrant call")
+    self.locked = true
     let collected = self.tax_collected
     require(collected > 0, "no tax to withdraw")
     let bal = self.balances[self.tax_recipient]
@@ -671,6 +675,7 @@ contract Token {
     self.balances[to] = new_to_bal
     self.tax_collected = 0
     emit Transfer(self.tax_recipient, to, collected)
+    self.locked = false
     return true
   }
 

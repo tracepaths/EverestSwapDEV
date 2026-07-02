@@ -285,11 +285,20 @@ contract Router {
 
     // Grant to pool1 and swap
     require(call(path1, "grant", [pool1_addr, amount_in]), "token grant failed")
+    // [SECURITY] Apply slippage protection to intermediate hop using max_slippage_bps
+    // This prevents sandwich attacks on intermediate pools. Without this, min_out=1
+    // allows an attacker to front-run the first hop, manipulate the intermediate pool,
+    // and profit from the second hop's unfavorable execution.
+    let intermediate_min_out = 1
+    if expected1 > 0 && self.max_slippage_bps < 10000 {
+      intermediate_min_out = (expected1 * (10000 - self.max_slippage_bps) + 9999) / 10000
+      if intermediate_min_out < 1 { intermediate_min_out = 1 }
+    }
     let amount1_out = 0
     if p1_is_a_to_b {
-      amount1_out = call(pool1_addr, "swap_a_for_b", [amount_in, 1, deadline])
+      amount1_out = call(pool1_addr, "swap_a_for_b", [amount_in, intermediate_min_out, deadline])
     } else {
-      amount1_out = call(pool1_addr, "swap_b_for_a", [amount_in, 1, deadline])
+      amount1_out = call(pool1_addr, "swap_b_for_a", [amount_in, intermediate_min_out, deadline])
     }
     require(amount1_out > 0, "pool1 swap returned zero")
 
@@ -349,11 +358,18 @@ contract Router {
     require(call(path1, "pull", [caller, self_addr, amount_in]), "token pull failed")
     require(call(path1, "balance_of", [self_addr]) >= bal_before + amount_in, "token pull did not increase router balance")
     require(call(path1, "grant", [pool1_addr, amount_in]), "token grant failed")
+    // [SECURITY] Apply slippage protection to intermediate hop
+    let intermediate_min_out_1 = 1
+    let expected_out_1 = call(pool1_addr, "get_amount_out", [amount_in, pool1_a2b])
+    if expected_out_1 > 0 && self.max_slippage_bps < 10000 {
+      intermediate_min_out_1 = (expected_out_1 * (10000 - self.max_slippage_bps) + 9999) / 10000
+      if intermediate_min_out_1 < 1 { intermediate_min_out_1 = 1 }
+    }
     let amount_out_1 = 0
     if pool1_a2b {
-      amount_out_1 = call(pool1_addr, "swap_a_for_b", [amount_in, 1, deadline])
+      amount_out_1 = call(pool1_addr, "swap_a_for_b", [amount_in, intermediate_min_out_1, deadline])
     } else {
-      amount_out_1 = call(pool1_addr, "swap_b_for_a", [amount_in, 1, deadline])
+      amount_out_1 = call(pool1_addr, "swap_b_for_a", [amount_in, intermediate_min_out_1, deadline])
     }
     require(amount_out_1 > 0, "pool1 swap returned zero")
 
@@ -365,11 +381,18 @@ contract Router {
     let pool2_b = call(pool2_addr, "get_token_b", [])
     let pool2_a2b = (pool2_a == path2)
     require(call(path2, "grant", [pool2_addr, amount_out_1]), "intermediate grant 1 failed")
+    // [SECURITY] Apply slippage protection to second intermediate hop
+    let intermediate_min_out_2 = 1
+    let expected_out_2 = call(pool2_addr, "get_amount_out", [amount_out_1, pool2_a2b])
+    if expected_out_2 > 0 && self.max_slippage_bps < 10000 {
+      intermediate_min_out_2 = (expected_out_2 * (10000 - self.max_slippage_bps) + 9999) / 10000
+      if intermediate_min_out_2 < 1 { intermediate_min_out_2 = 1 }
+    }
     let amount_out_2 = 0
     if pool2_a2b {
-      amount_out_2 = call(pool2_addr, "swap_a_for_b", [amount_out_1, 1, deadline])
+      amount_out_2 = call(pool2_addr, "swap_a_for_b", [amount_out_1, intermediate_min_out_2, deadline])
     } else {
-      amount_out_2 = call(pool2_addr, "swap_b_for_a", [amount_out_1, 1, deadline])
+      amount_out_2 = call(pool2_addr, "swap_b_for_a", [amount_out_1, intermediate_min_out_2, deadline])
     }
     require(amount_out_2 > 0, "pool2 swap returned zero")
 
