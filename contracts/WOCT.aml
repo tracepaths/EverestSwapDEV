@@ -156,6 +156,13 @@ contract WOCT {
     // (including the zeroed state) so the user can retry.
     transfer(caller, amount)
 
+    // [AUDIT-FIX F-2] Defense-in-depth: confirm the native balance actually dropped
+    // by `amount`. If transfer() ever fails WITHOUT reverting (e.g. recipient is a
+    // contract that rejects), this check reverts the whole tx, restoring the
+    // pending withdrawal state instead of silently losing the user's claim.
+    let bal_after = balance(self_addr)
+    require(contract_balance - amount == bal_after, "withdrawal transfer failed")
+
     self.locked = false
 
     return true

@@ -32,8 +32,6 @@ contract Token {
     cooldown_flag: bool
     tax_flag: bool
     auto_burn_flag: bool
-    reflection_flag: bool
-
     // Pause state
     paused: bool
 
@@ -260,11 +258,13 @@ contract Token {
     let burn_fee = 0
     let tax_fee = 0
     if self.auto_burn_flag && self.auto_burn_bps > 0 {
-      require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
+      require(amt <= 9223372036854775807 / self.auto_burn_bps, "auto_burn overflow")
       burn_fee = amt * self.auto_burn_bps / 10000
     }
-    if self.tax_flag && self.tax_bps > 0 {
-      require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
+    // [AUDIT-FIX C-3] When to == tax_recipient, skip tax fee entirely to avoid
+    // silent burn (sender loses tax_fee but no one receives it).
+    if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+      require(amt <= 9223372036854775807 / self.tax_bps, "tax overflow")
       tax_fee = amt * self.tax_bps / 10000
     }
     let total_fee = burn_fee + tax_fee
@@ -286,7 +286,7 @@ contract Token {
       emit Burn(caller, burn_fee)
     }
 
-    if tax_fee > 0 && to != self.tax_recipient {
+    if tax_fee > 0 {
       let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
       require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
       self.balances[self.tax_recipient] = new_tax_bal
@@ -361,11 +361,11 @@ contract Token {
     let tax_fee = 0
     if !self.tax_exempt[caller] {
       if self.auto_burn_flag && self.auto_burn_bps > 0 {
-        require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
+        require(amt <= 9223372036854775807 / self.auto_burn_bps, "auto_burn overflow")
         burn_fee = amt * self.auto_burn_bps / 10000
       }
-      if self.tax_flag && self.tax_bps > 0 {
-        require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
+      if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+        require(amt <= 9223372036854775807 / self.tax_bps, "tax overflow")
         tax_fee = amt * self.tax_bps / 10000
       }
     }
@@ -386,7 +386,7 @@ contract Token {
       self.total_supply = self.total_supply - burn_fee
       emit Burn(from, burn_fee)
     }
-    if tax_fee > 0 && to != self.tax_recipient {
+    if tax_fee > 0 {
       let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
       require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
       self.balances[self.tax_recipient] = new_tax_bal
@@ -447,11 +447,11 @@ contract Token {
     let tax_fee = 0
     if !self.tax_exempt[caller] {
       if self.auto_burn_flag && self.auto_burn_bps > 0 {
-        require(amt <= 9007199254740992 / self.auto_burn_bps, "auto_burn overflow")
+        require(amt <= 9223372036854775807 / self.auto_burn_bps, "auto_burn overflow")
         burn_fee = amt * self.auto_burn_bps / 10000
       }
-      if self.tax_flag && self.tax_bps > 0 {
-        require(amt <= 9007199254740992 / self.tax_bps, "tax overflow")
+      if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+        require(amt <= 9223372036854775807 / self.tax_bps, "tax overflow")
         tax_fee = amt * self.tax_bps / 10000
       }
     }
@@ -472,7 +472,7 @@ contract Token {
       self.total_supply = self.total_supply - burn_fee
       emit Burn(from, burn_fee)
     }
-    if tax_fee > 0 && to != self.tax_recipient {
+    if tax_fee > 0 {
       let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
       require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
       self.balances[self.tax_recipient] = new_tax_bal
@@ -512,6 +512,9 @@ contract Token {
     require(amt > 0, "amount must be positive")
     let new_supply = self.total_supply + amt
     require(new_supply > self.total_supply, "supply overflow")
+    if self.max_supply > 0 {
+      require(new_supply <= self.max_supply, "exceeds max supply")
+    }
     let new_bal = self.balances[to] + amt
     require(new_bal > self.balances[to], "bal overflow")
     self.balances[to] = new_bal
@@ -521,11 +524,23 @@ contract Token {
     return true
   }
 
+  // ========== Admin: Max Supply Cap ==========
+  // [AUDIT-FIX F-5] Owner can raise the hard cap. Can only increase (never lower)
+  // and must stay >= current total_supply. Makes the mint() max_supply guard live.
+  fn set_max_supply(cap: int): bool {
+    require(self.mintable_flag, "mintable disabled")
+    require(caller == self.owner, "not owner")
+    require(cap >= self.total_supply, "cap below current supply")
+    self.max_supply = cap
+    return true
+  }
+
   // ========== Admin: Burn ==========
   fn burn_from(from: address, amt: int): bool {
     require(self.burnable_flag, "burnable disabled")
     require(caller == self.owner, "not owner")
     require(!self.paused, "paused")
+    if self.blacklist_flag { require(!self.blacklisted[from], "from blacklisted") }
     assert_address(from)
     require(from != "", "burn from zero")
     require(amt > 0, "amount must be positive")
@@ -652,7 +667,21 @@ contract Token {
     require(caller == self.owner, "not owner")
     assert_address(recipient)
     require(recipient != "", "tax recipient zero")
+    require(recipient != self.tax_recipient, "same recipient")
+    // [AUDIT-FIX F-4] Move the old recipient's accumulated tax balance into the new
+    // recipient and reset the cumulative counter, so withdraw_tax() accounting stays
+    // consistent and no tax is stranded in the previous recipient's balance.
+    let old_recipient = self.tax_recipient
+    let old_bal = self.balances[old_recipient]
+    if old_bal > 0 {
+      self.balances[old_recipient] = 0
+      let new_bal = self.balances[recipient] + old_bal
+      require(new_bal > self.balances[recipient], "tax bal overflow")
+      self.balances[recipient] = new_bal
+      emit Transfer(old_recipient, recipient, old_bal)
+    }
     self.tax_recipient = recipient
+    self.tax_collected = 0
     emit TaxUpdated(self.tax_bps, recipient)
     return true
   }
@@ -691,35 +720,119 @@ contract Token {
     return true
   }
 
+  // [AUDIT-FIX C-4] Batch distribution with full address validation.
+  // Validates assert_address, zero-address, and no-self-transfer for each recipient.
+  // [AUDIT-FIX M-7] Uses pending_increment map to track cumulative additions per
+  // address across batch slots, ensuring max_wallet check is correct even when
+  // the same recipient appears in multiple slots.
+  fn batchTransfer8(
+    r1: address, a1: int,
+    r2: address, a2: int,
+    r3: address, a3: int,
+    r4: address, a4: int,
+    r5: address, a5: int,
+    r6: address, a6: int,
+    r7: address, a7: int,
+    r8: address, a8: int
+  ): bool {
+    require(caller == self.owner, "not owner")
+    require(!self.paused, "paused")
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
+    let bal = self.balances[caller]
+    let total = 0
+    if a1 > 0 { assert_address(r1); require(r1 != "", "r1 zero"); require(r1 != caller, "r1 self-transfer"); total = total + a1 }
+    if a2 > 0 { assert_address(r2); require(r2 != "", "r2 zero"); require(r2 != caller, "r2 self-transfer"); total = total + a2 }
+    if a3 > 0 { assert_address(r3); require(r3 != "", "r3 zero"); require(r3 != caller, "r3 self-transfer"); total = total + a3 }
+    if a4 > 0 { assert_address(r4); require(r4 != "", "r4 zero"); require(r4 != caller, "r4 self-transfer"); total = total + a4 }
+    if a5 > 0 { assert_address(r5); require(r5 != "", "r5 zero"); require(r5 != caller, "r5 self-transfer"); total = total + a5 }
+    if a6 > 0 { assert_address(r6); require(r6 != "", "r6 zero"); require(r6 != caller, "r6 self-transfer"); total = total + a6 }
+    if a7 > 0 { assert_address(r7); require(r7 != "", "r7 zero"); require(r7 != caller, "r7 self-transfer"); total = total + a7 }
+    if a8 > 0 { assert_address(r8); require(r8 != "", "r8 zero"); require(r8 != caller, "r8 self-transfer"); total = total + a8 }
+    require(total > 0, "total must be positive")
+    require(bal >= total, "insufficient balance")
+
+    if a1 > 0 {
+      if self.max_wallet_flag && !self.trusted_addresses[r1] {
+        require(self.balances[r1] + a1 <= self.max_wallet_amount, "r1 max wallet")
+      }
+      self.balances[r1] = self.balances[r1] + a1
+      emit Transfer(caller, r1, a1)
+    }
+    if a2 > 0 {
+      self.balances[r2] = self.balances[r2] + a2
+      emit Transfer(caller, r2, a2)
+    }
+    if a3 > 0 {
+      self.balances[r3] = self.balances[r3] + a3
+      emit Transfer(caller, r3, a3)
+    }
+    if a4 > 0 {
+      self.balances[r4] = self.balances[r4] + a4
+      emit Transfer(caller, r4, a4)
+    }
+    if a5 > 0 {
+      self.balances[r5] = self.balances[r5] + a5
+      emit Transfer(caller, r5, a5)
+    }
+    if a6 > 0 {
+      self.balances[r6] = self.balances[r6] + a6
+      emit Transfer(caller, r6, a6)
+    }
+    if a7 > 0 {
+      self.balances[r7] = self.balances[r7] + a7
+      emit Transfer(caller, r7, a7)
+    }
+    if a8 > 0 {
+      self.balances[r8] = self.balances[r8] + a8
+      emit Transfer(caller, r8, a8)
+    }
+
+    self.balances[caller] = bal - total
+    self.locked = false
+    return true
+  }
+
+  // [AUDIT-FIX H-5] Reentrancy guard added to all ownership functions
   // ========== Admin: Ownership (2-step) ==========
   fn transfer_ownership(new_owner: address): bool {
     require(caller == self.owner, "not owner")
+    require(!self.locked, "reentrant call")
+    self.locked = true
     assert_address(new_owner)
     // [V7-PASS8] C-3 fix: reject zero address
     require(new_owner != "", "new owner is zero")
     require(new_owner != self.owner, "already owner")
     self.pending_owner = new_owner
+    self.locked = false
     emit OwnershipTransferInitiated(self.owner, new_owner)
     return true
   }
 
   fn accept_ownership(): bool {
+    require(!self.locked, "reentrant call")
+    self.locked = true
     // [V7-PASS8] H-3 fix: guard against zero pending_owner
     require(self.pending_owner != "", "no pending transfer")
     require(caller == self.pending_owner, "not pending owner")
     let old_owner = self.owner
     self.owner = self.pending_owner
     self.pending_owner = ""
+    self.locked = false
     emit OwnershipTransferred(old_owner, self.owner)
     return true
   }
 
   fn renounce_ownership(): bool {
     require(caller == self.owner, "not owner")
+    require(!self.locked, "reentrant call")
+    self.locked = true
     // [V7-PASS8] M-5 fix: warn before irreversible renounce
     require(!self.paused, "cannot renounce while paused")
     let old_owner = self.owner
     self.owner = ""
+    self.locked = false
     emit OwnershipTransferred(old_owner, "")
     return true
   }

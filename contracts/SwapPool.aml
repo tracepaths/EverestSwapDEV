@@ -248,16 +248,33 @@ contract SwapPool {
       return (lp, amount_a, amount_b)
     }
 
-    // [AUDIT-FIX NEW-6] Proportional add — calculate FIRST
-    let lp_a = amount_a * self.total_lp / self.reserve_a
-    let lp_b = amount_b * self.total_lp / self.reserve_b
+    // [AUDIT-FIX F-1] Proportional add — overflow-guarded LP math (divide-back).
+    // amount_x * total_lp can wrap int64 on large pools; verify by dividing back.
+    let lp_prod_a = amount_a * self.total_lp
+    if self.total_lp > 0 {
+      require(lp_prod_a / amount_a == self.total_lp, "lp_a overflow")
+    }
+    let lp_a = lp_prod_a / self.reserve_a
+    let lp_prod_b = amount_b * self.total_lp
+    if self.total_lp > 0 {
+      require(lp_prod_b / amount_b == self.total_lp, "lp_b overflow")
+    }
+    let lp_b = lp_prod_b / self.reserve_b
     let lp_amount = lp_a < lp_b ? lp_a : lp_b
 
     // [SECURITY] H-1: Validate FIRST (before any external call)
     require(lp_amount >= min_lp && lp_amount > 0, "min_lp not satisfied")
 
-    let used_a = lp_amount * self.reserve_a / self.total_lp
-    let used_b = lp_amount * self.reserve_b / self.total_lp
+    let used_prod_a = lp_amount * self.reserve_a
+    if lp_amount > 0 {
+      require(used_prod_a / lp_amount == self.reserve_a, "used_a overflow")
+    }
+    let used_a = used_prod_a / self.total_lp
+    let used_prod_b = lp_amount * self.reserve_b
+    if lp_amount > 0 {
+      require(used_prod_b / lp_amount == self.reserve_b, "used_b overflow")
+    }
+    let used_b = used_prod_b / self.total_lp
 
     // [V3-AUDIT-FIX] Prevent rounding to zero on contribution
     require(used_a > 0 && used_b > 0, "used amount cannot be zero due to rounding")
@@ -359,8 +376,17 @@ contract SwapPool {
 
     self.locked = true
 
-    let amount_a = lp_amount * self.reserve_a / self.total_lp
-    let amount_b = lp_amount * self.reserve_b / self.total_lp
+    // [AUDIT-FIX F-1] Overflow-guarded LP math (divide-back)
+    let amt_prod_a = lp_amount * self.reserve_a
+    if lp_amount > 0 {
+      require(amt_prod_a / lp_amount == self.reserve_a, "amount_a overflow")
+    }
+    let amount_a = amt_prod_a / self.total_lp
+    let amt_prod_b = lp_amount * self.reserve_b
+    if lp_amount > 0 {
+      require(amt_prod_b / lp_amount == self.reserve_b, "amount_b overflow")
+    }
+    let amount_b = amt_prod_b / self.total_lp
     require(amount_a > 0 && amount_b > 0, "zero output")
 
     require(amount_a >= min_a, "amount_a below minimum")
@@ -466,8 +492,17 @@ contract SwapPool {
 
     self.locked = true
 
-    let amount_a = lp_bal * self.reserve_a / self.total_lp
-    let amount_b = lp_bal * self.reserve_b / self.total_lp
+    // [AUDIT-FIX F-1] Overflow-guarded LP math (divide-back)
+    let amt_prod_a = lp_bal * self.reserve_a
+    if lp_bal > 0 {
+      require(amt_prod_a / lp_bal == self.reserve_a, "amount_a overflow")
+    }
+    let amount_a = amt_prod_a / self.total_lp
+    let amt_prod_b = lp_bal * self.reserve_b
+    if lp_bal > 0 {
+      require(amt_prod_b / lp_bal == self.reserve_b, "amount_b overflow")
+    }
+    let amount_b = amt_prod_b / self.total_lp
     require(amount_a > 0 && amount_b > 0, "zero output")
 
     require(amount_a >= min_a, "amount_a below minimum")
@@ -816,12 +851,15 @@ contract SwapPool {
   }
 
   // [S1-SP-02] Set maximum initial price ratio (owner only)
-  // Ratio of 100 means max 100:1 or 1:100. Set to 0 to disable check.
+  // [AUDIT-FIX M-5] Added event emission
+  event MaxInitialPriceRatioSet(old_ratio: int, new_ratio: int)
   fn set_max_initial_price_ratio(ratio: int): bool {
     require(caller == self.owner, "not authorized")
     require(!self.locked, "reentrancy guard")
     require(ratio >= 0, "ratio cannot be negative")
+    let old_ratio = self.max_initial_price_ratio
     self.max_initial_price_ratio = ratio
+    emit MaxInitialPriceRatioSet(old_ratio, ratio)
     return true
   }
 
@@ -851,6 +889,8 @@ contract SwapPool {
 
   fn set_fee_params(num: int, denom: int): bool {
     require(caller == self.owner, "not authorized")
+    // [AUDIT-FIX F-7] Consistent reentrancy guard (parity with other setters)
+    require(!self.locked, "reentrancy guard")
     require(denom > 0, "denominator must be > 0")
     require(num > 0, "numerator must be > 0")
     require(num < denom, "fee must be < 100%")
@@ -1005,6 +1045,8 @@ contract SwapPool {
 
   fn set_max_positions_per_user(limit: int): bool {
     require(caller == self.owner, "not authorized")
+    // [AUDIT-FIX F-7] Consistent reentrancy guard (parity with other setters)
+    require(!self.locked, "reentrancy guard")
     require(limit > 0, "limit must be positive")
     // [SECURITY] H-1: Upper bound to prevent DoS via gas-bomb in view calls
     // (get_lp_balance, get_locked_liquidity, get_unlocked_liquidity all traverse the

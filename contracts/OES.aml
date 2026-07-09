@@ -326,9 +326,10 @@ contract OES {
     require(new_owner != "", "new owner is zero address")
     // [V7-CRIT-7] Two-step ownership transfer
     require(new_owner != self.rewards_vault, "new owner cannot be rewards vault")
+    // [AUDIT-FIX M-6] Reset pending_vault_snapshot on re-call so a cancelled
+    // transfer doesn't leave stale snapshot that could bypass the vault check
+    // in accept_ownership (e.g., second proposal with changed rewards_vault).
     self.pending_owner = new_owner
-    // [SECURITY] Snapshot the rewards_vault at proposal time so the transfer
-    // cannot be DoS'd by changing the vault after the proposal
     self.pending_vault_snapshot = self.rewards_vault
     emit OwnershipTransferProposed(self.owner, new_owner)
     return true

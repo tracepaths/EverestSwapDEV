@@ -39,8 +39,10 @@ contract Router {
     // [AUDIT-FIX LOW-1] Simpan owner di state dari constructor
     self.owner = origin
     self.paused = false
-    // [AUDIT-FIX NEW-35] Default max slippage: 50% (5000 bps)
-    self.max_slippage_bps = 5000
+    // [AUDIT-FIX F-3] Default max slippage: 10% (1000 bps), aligned with setter cap
+    // and docs. Previous 50% default left single-hop swaps exposed to sandwich until
+    // the owner lowered it.
+    self.max_slippage_bps = 1000
     // [V7-CRIT-8] Two-step ownership: no pending owner at start
     self.pending_owner = ""
     // [S1-RT-01] No pending factory/woct changes at start
@@ -306,6 +308,7 @@ contract Router {
     let pool2_addr = call(self.factory, "get_pool", [path2, path3])
     require(pool2_addr != "", "no pool for path2/path3")
     require(to != pool2_addr, "recipient cannot be pool2")
+    require(to != pool1_addr, "recipient cannot be pool1")
 
     let p2_token_a = call(pool2_addr, "get_token_a", [])
     let p2_token_b = call(pool2_addr, "get_token_b", [])
