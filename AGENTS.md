@@ -119,6 +119,31 @@ Ed25519 keypair → SHA256(pubkey) → Base58 → "oct"+b58 (47 chars)
 - **SwapPool.aml** — AMM with x*y=k, 0.3% fee (max 1%). Fee-on-transfer safe (balance-before/after). Initial price ratio capped at 100:1. Position-based LP tracking.
 - **SwapFactory.aml** — Pool registry. `register_pool(addr)` is **permissionless**. Setter transfer has 24h timelock. Trusted token list capped at 100.
 - **Router.aml** — `swap_exact_tokens_for_tokens(amountIn, minOut, recipient)` — max slippage 10%. Factory/WOCT address changes have 24h timelock.
+- **RewardPool.aml** — [V9] Extended AMM with custom rewards. Same x*y=k as SwapPool + linear reward distribution. `set_reward_config()` (one-shot, immutable), `claim_reward()`, `emergency_withdraw()` (7-day cooldown after reward end). Reward token must be OCS01-compatible. Creator LP locked min 7 days.
+
+## Reward Pool Flow
+
+### Creating a Reward Pool
+
+1. Deploy `RewardPool.aml` — same compile/deploy flow as SwapPool
+2. Call `set_tokens(tokenA, tokenB)` on pool
+3. Call `set_reward_config(rewardToken, amount, startEpoch, endEpoch)` — **one-shot, immutable**
+4. Call `register_reward_pool(tokenA, tokenB, rewardToken, poolAddr)` on factory
+5. Call `rewardToken.grant(poolAddr, amount)` to fund rewards
+6. Optional: `add_liquidity()` with initial liquidity
+
+### Claiming Rewards
+
+```
+to_: "<pool>", amount: "0",
+encrypted_data: "claim_reward", message: "[]"
+```
+
+Pool calculates: `per_epoch × elapsed × user_lp / total_lp` and transfers reward tokens.
+
+### Emergency Withdraw (Anti-Rugpull)
+
+Available only after `reward_end` + 7-day cooldown (100800 epochs). Creator can withdraw remaining unfunded rewards.
 
 ## Token Grant/Pull Pattern
 

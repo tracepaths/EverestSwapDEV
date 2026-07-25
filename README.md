@@ -8,6 +8,7 @@ Smart contracts, deployment scripts, and tooling for EverestSwap DEX on Octra Ne
 - **Liquidity** — Add/remove liquidity, earn LP tokens
 - **Pool Creation** — Permissionless pool registration via factory
 - **Token Standard** — OCS01 ERC20-compatible tokens
+- **[V9] Reward Pools** — Custom reward distribution with any OCS01 token, linear distribution, anti-rugpull protection
 
 ## Repos
 

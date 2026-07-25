@@ -1,0 +1,1124 @@
+contract RewardPool {
+  state {
+    // ===== AMM State (identical to SwapPool) =====
+    token_a: address
+    token_b: address
+    reserve_a: int
+    reserve_b: int
+    total_lp: int
+    factory: address
+    fee_numerator: int
+    fee_denominator: int
+    active: bool
+    owner: address
+    locked: bool
+    minimum_liquidity: int
+    fee_reserve_a: int
+    fee_reserve_b: int
+    pending_owner: address
+    // [V7] Position-based LP tracking (UniswapV4-like)
+    position_owners: map[int]address
+    position_liquidities: map[int]int
+    position_unlock_times: map[int]int
+    position_owner_count: map[address]int
+    next_position_id: int
+    total_liquidity: int
+    // [SECURITY] Indexed position linked list per user
+    user_position_next: map[int]int
+    user_position_prev: map[int]int
+    user_head_position: map[address]int
+    user_tail_position: map[address]int
+    max_positions_per_user: int
+    total_locked_lp: int
+    max_initial_price_ratio: int
+    // TWAP oracle
+    twap_price_cumulative_a: int
+    twap_price_cumulative_b: int
+    twap_last_update_epoch: int
+
+    // ===== Reward State (new) =====
+    reward_token: address           // OCS01-compatible reward token
+    reward_total: int               // total reward deposited (immutable)
+    reward_remaining: int           // remaining undistributed reward
+    reward_per_epoch: int           // = reward_total / duration (auto-calculated)
+    reward_start_epoch: int         // distribution start epoch
+    reward_end_epoch: int           // distribution end epoch
+    distribution_type: int          // 1 = linear (fixed)
+    creator: address                // pool creator
+    creator_lock_end: int           // creator LP lock deadline (anti-rugpull)
+    emergency_cooldown: int         // cooldown after reward end (default: 7 days = 100800)
+    emergency_available_after: int  // = reward_end_epoch + emergency_cooldown
+    reward_configured: bool         // flag: reward params set (one-shot)
+    // Per-position reward tracking
+    last_claim_epoch: map[int]int   // position_id → last claim epoch
+  }
+
+  // ===== Events =====
+  event Swap(who: address, token_in: address, amount_in: int, amount_out: int)
+  event AddLiquidity(who: address, amount_a: int, amount_b: int, lp: int)
+  event RemoveLiquidity(who: address, amount_a: int, amount_b: int, lp: int)
+  event PositionAdded(id: int, owner: address, liquidity: int, unlock_time: int)
+  event PositionRemoved(id: int, owner: address, liquidity: int)
+  event Sync(reserve_a: int, reserve_b: int)
+  event PoolActivated(active: bool)
+  event MaxPositionsPerUserUpdated(limit: int)
+  event FeeParamsSet(old_num: int, old_denom: int, new_num: int, new_denom: int)
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
+  event FeesClaimed(recipient: address, amount_a: int, amount_b: int)
+  event MaxInitialPriceRatioSet(old_ratio: int, new_ratio: int)
+  // Reward events
+  event RewardConfigured(token: address, amount: int, start: int, end: int)
+  event RewardClaimed(position_id: int, who: address, amount: int)
+  event EmergencyWithdraw(amount: int)
+
+  constructor() {
+    self.token_a = origin
+    self.token_b = origin
+    self.reserve_a = 0
+    self.reserve_b = 0
+    self.total_lp = 0
+    self.factory = origin
+    self.fee_numerator = 3
+    self.fee_denominator = 1000
+    self.active = true
+    self.owner = origin
+    self.locked = false
+    self.minimum_liquidity = 1000
+    self.fee_reserve_a = 0
+    self.fee_reserve_b = 0
+    self.pending_owner = ""
+    // Position tracking
+    self.next_position_id = 1
+    self.total_liquidity = 0
+    self.max_positions_per_user = 100
+    self.total_locked_lp = 0
+    self.max_initial_price_ratio = 100
+    // Reward defaults
+    self.reward_token = ""
+    self.reward_total = 0
+    self.reward_remaining = 0
+    self.reward_per_epoch = 0
+    self.reward_start_epoch = 0
+    self.reward_end_epoch = 0
+    self.distribution_type = 1
+    self.creator = ""
+    self.creator_lock_end = 0
+    self.emergency_cooldown = 100800
+    self.emergency_available_after = 0
+    self.reward_configured = false
+  }
+
+  // ===== Pool Initialization =====
+
+  fn set_tokens(addr_a: address, addr_b: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.total_lp == 0, "already initialized")
+    assert_address(addr_a)
+    assert_address(addr_b)
+    require(addr_a != addr_b, "identical tokens")
+    require(self.token_a == origin && self.token_b == origin, "tokens already set")
+    self.token_a = addr_a
+    self.token_b = addr_b
+    return true
+  }
+
+  fn set_factory(addr: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(self.factory == origin, "factory already set")
+    assert_address(addr)
+    require(addr != "", "zero factory address")
+    self.factory = addr
+    return true
+  }
+
+  // ===== Reward Configuration (one-shot) =====
+
+  fn set_reward_config(token: address, amount: int, start: int, end: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.reward_configured, "reward already configured")
+    require(amount > 0, "reward must be positive")
+    require(end > start, "end must be after start")
+    require(end - start <= 5256000, "duration too long (max 365 days)")
+    assert_address(token)
+    require(token != "", "zero reward token")
+    require(token != self.token_a && token != self.token_b, "reward token is pair token")
+    require(start >= epoch, "start must be in the future")
+
+    self.reward_token = token
+    self.reward_total = amount
+    self.reward_remaining = amount
+    self.reward_start_epoch = start
+    self.reward_end_epoch = end
+    self.reward_per_epoch = amount / (end - start)
+    self.creator = caller
+
+    // Creator lock: minimum 7 days or pool duration, whichever smaller
+    let creator_lock = 100800
+    if (end - start) < creator_lock {
+      creator_lock = end - start
+    }
+    self.creator_lock_end = start + creator_lock
+    self.emergency_available_after = end + self.emergency_cooldown
+    self.reward_configured = true
+
+    emit RewardConfigured(token, amount, start, end)
+    return true
+  }
+
+  // ===== Liquidity =====
+
+  fn add_liquidity(amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    require(self.active, "pool not active")
+    require(!self.locked, "reentrancy guard")
+    require(amount_a > 0 && amount_b > 0, "zero amounts")
+    require(self.token_a != "" && self.token_b != "", "tokens not set")
+    require(lock_duration >= 0, "lock_duration cannot be negative")
+    require(lock_duration <= 525600, "lock_duration too long (max 365 days)")
+    require(self.position_owner_count[caller] < self.max_positions_per_user, "max positions reached")
+
+    self.locked = true
+
+    let is_first = self.total_lp == 0
+
+    if is_first {
+      // [V8-SECURITY] Only the pool owner can seed initial liquidity
+      require(caller == self.owner, "not authorized")
+
+      // [AUDIT-FIX CRIT-2] Use geometric mean (sqrt)
+      let product = amount_a * amount_b
+      if amount_a > 0 {
+        require(product / amount_a == amount_b, "amount_a * amount_b overflow")
+      }
+      let lp_raw = 0
+      if product > 3 {
+        let z = product
+        let x = product / 2 + 1
+        while x < z {
+          z = x
+          x = (product / x + x) / 2
+        }
+        lp_raw = z
+      } else if product != 0 {
+        lp_raw = 1
+      }
+      require(lp_raw > self.minimum_liquidity, "initial liquidity too low")
+
+      let lp = lp_raw - self.minimum_liquidity
+      require(lp >= min_lp, "min_lp not satisfied")
+
+      // Equilibrium price guard
+      require(call(self.factory, "validate_initial_price", [self.token_a, self.token_b, amount_a, amount_b]), "equilibrium price check failed")
+
+      // Initial price ratio bounds
+      if self.max_initial_price_ratio > 0 {
+        require(amount_a <= amount_b * self.max_initial_price_ratio, "initial price ratio too high")
+        require(amount_b <= amount_a * self.max_initial_price_ratio, "initial price ratio too low")
+      }
+
+      // Fee-on-transfer safe: balance-before/after
+      let bal_a_before = call(self.token_a, "balance_of", [self_addr])
+      require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+      let bal_a_after = call(self.token_a, "balance_of", [self_addr])
+      let actual_a = bal_a_after - bal_a_before
+
+      let bal_b_before = call(self.token_b, "balance_of", [self_addr])
+      require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
+      let bal_b_after = call(self.token_b, "balance_of", [self_addr])
+      let actual_b = bal_b_after - bal_b_before
+
+      // CEI: state before external calls
+      self.reserve_a = actual_a
+      self.reserve_b = actual_b
+      self.total_lp = lp_raw
+      self.total_liquidity = lp
+
+      // Create position
+      let position_id = self.next_position_id
+      self.next_position_id += 1
+      let unlock_epoch = 0
+      if lock_duration > 0 {
+        unlock_epoch = epoch + lock_duration
+      }
+      self.position_owners[position_id] = caller
+      self.position_liquidities[position_id] = lp
+      self.position_unlock_times[position_id] = unlock_epoch
+      self.position_owner_count[caller] += 1
+
+      // Link into user's position linked list
+      require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
+      let _prev_tail = self.user_tail_position[caller]
+      if _prev_tail == 0 {
+        self.user_head_position[caller] = position_id
+        self.user_tail_position[caller] = position_id
+        self.user_position_prev[position_id] = 0
+        self.user_position_next[position_id] = 0
+      } else {
+        self.user_position_next[_prev_tail] = position_id
+        self.user_position_prev[position_id] = _prev_tail
+        self.user_tail_position[caller] = position_id
+        self.user_position_next[position_id] = 0
+      }
+      if lock_duration > 0 {
+        self.total_locked_lp += lp
+      }
+
+      // Initialize claim epoch for reward tracking
+      if self.reward_configured {
+        self.last_claim_epoch[position_id] = self.reward_start_epoch
+      }
+
+      self.locked = false
+      emit AddLiquidity(caller, amount_a, amount_b, lp)
+      emit PositionAdded(position_id, caller, lp, unlock_epoch)
+      emit Sync(self.reserve_a, self.reserve_b)
+      return (lp, amount_a, amount_b)
+    }
+
+    // Proportional add — overflow-guarded LP math
+    let lp_prod_a = amount_a * self.total_lp
+    if self.total_lp > 0 {
+      require(lp_prod_a / amount_a == self.total_lp, "lp_a overflow")
+    }
+    let lp_a = lp_prod_a / self.reserve_a
+    let lp_prod_b = amount_b * self.total_lp
+    if self.total_lp > 0 {
+      require(lp_prod_b / amount_b == self.total_lp, "lp_b overflow")
+    }
+    let lp_b = lp_prod_b / self.reserve_b
+    let lp_amount = lp_a < lp_b ? lp_a : lp_b
+
+    require(lp_amount >= min_lp && lp_amount > 0, "min_lp not satisfied")
+
+    let used_prod_a = lp_amount * self.reserve_a
+    if lp_amount > 0 {
+      require(used_prod_a / lp_amount == self.reserve_a, "used_a overflow")
+    }
+    let used_a = used_prod_a / self.total_lp
+    let used_prod_b = lp_amount * self.reserve_b
+    if lp_amount > 0 {
+      require(used_prod_b / lp_amount == self.reserve_b, "used_b overflow")
+    }
+    let used_b = used_prod_b / self.total_lp
+
+    require(used_a > 0 && used_b > 0, "used amount cannot be zero due to rounding")
+    require(used_a <= amount_a, "used_a exceeds amount_a")
+    require(used_b <= amount_b, "used_b exceeds amount_b")
+
+    let refund_a = amount_a - used_a
+    let refund_b = amount_b - used_b
+
+    // Fee-on-transfer safe
+    let bal_a_before2 = call(self.token_a, "balance_of", [self_addr])
+    require(call(self.token_a, "pull", [caller, self_addr, amount_a]), "token_a pull failed")
+    let bal_a_after2 = call(self.token_a, "balance_of", [self_addr])
+    let actual_a2 = bal_a_after2 - bal_a_before2
+
+    let bal_b_before2 = call(self.token_b, "balance_of", [self_addr])
+    require(call(self.token_b, "pull", [caller, self_addr, amount_b]), "token_b pull failed")
+    let bal_b_after2 = call(self.token_b, "balance_of", [self_addr])
+    let actual_b2 = bal_b_after2 - bal_b_before2
+
+    require(actual_a2 >= used_a, "token_a fee-on-transfer: received less than used")
+    require(actual_b2 >= used_b, "token_b fee-on-transfer: received less than used")
+
+    // CEI: update state
+    self.reserve_a += actual_a2
+    self.reserve_b += actual_b2
+    self.total_lp += lp_amount
+    self.total_liquidity += lp_amount
+
+    // Create position
+    let position_id2 = self.next_position_id
+    self.next_position_id += 1
+    let unlock_epoch2 = 0
+    if lock_duration > 0 {
+      unlock_epoch2 = epoch + lock_duration
+    }
+    self.position_owners[position_id2] = caller
+    self.position_liquidities[position_id2] = lp_amount
+    self.position_unlock_times[position_id2] = unlock_epoch2
+    self.position_owner_count[caller] += 1
+
+    // Link into user's position linked list
+    require(self.user_position_prev[position_id2] == 0 && self.user_position_next[position_id2] == 0, "position already linked")
+    let _prev_tail2 = self.user_tail_position[caller]
+    if _prev_tail2 == 0 {
+      self.user_head_position[caller] = position_id2
+      self.user_tail_position[caller] = position_id2
+      self.user_position_prev[position_id2] = 0
+      self.user_position_next[position_id2] = 0
+    } else {
+      self.user_position_next[_prev_tail2] = position_id2
+      self.user_position_prev[position_id2] = _prev_tail2
+      self.user_tail_position[caller] = position_id2
+      self.user_position_next[position_id2] = 0
+    }
+    if lock_duration > 0 {
+      self.total_locked_lp += lp_amount
+    }
+
+    // Initialize claim epoch for reward tracking
+    if self.reward_configured {
+      self.last_claim_epoch[position_id2] = self.reward_start_epoch
+    }
+
+    emit AddLiquidity(caller, used_a, used_b, lp_amount)
+    emit PositionAdded(position_id2, caller, lp_amount, unlock_epoch2)
+    emit Sync(self.reserve_a, self.reserve_b)
+
+    // Refund excess tokens after state is committed
+    if refund_a > 0 {
+      require(call(self.token_a, "transfer", [caller, refund_a]), "token_a refund failed")
+    }
+    if refund_b > 0 {
+      require(call(self.token_b, "transfer", [caller, refund_b]), "token_b refund failed")
+    }
+
+    self.locked = false
+    return (lp_amount, used_a, used_b)
+  }
+
+  fn remove_liquidity(position_id: int, min_a: int, min_b: int, deadline: int): (int, int) {
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    require(self.active, "pool not active")
+    require(!self.locked, "reentrancy guard")
+    require(position_id > 0, "invalid position id")
+    require(self.position_owners[position_id] == caller, "not position owner")
+    require(self.total_lp > 0, "no liquidity")
+
+    let lp_amount = self.position_liquidities[position_id]
+    let unlock_time = self.position_unlock_times[position_id]
+    require(lp_amount > 0, "position not found")
+    require(epoch >= unlock_time, "liquidity is locked")
+
+    self.locked = true
+
+    // Overflow-guarded LP math
+    let amt_prod_a = lp_amount * self.reserve_a
+    if lp_amount > 0 {
+      require(amt_prod_a / lp_amount == self.reserve_a, "amount_a overflow")
+    }
+    let amount_a = amt_prod_a / self.total_lp
+    let amt_prod_b = lp_amount * self.reserve_b
+    if lp_amount > 0 {
+      require(amt_prod_b / lp_amount == self.reserve_b, "amount_b overflow")
+    }
+    let amount_b = amt_prod_b / self.total_lp
+    require(amount_a > 0 && amount_b > 0, "zero output")
+    require(amount_a >= min_a, "amount_a below minimum")
+    require(amount_b >= min_b, "amount_b below minimum")
+
+    // CEI: update state before transfer
+    self.position_owners[position_id] = ""
+    self.position_liquidities[position_id] = 0
+    self.position_unlock_times[position_id] = 0
+    self.total_lp -= lp_amount
+    self.total_liquidity -= lp_amount
+
+    self.position_owner_count[caller] -= 1
+
+    // Unlink from user's position linked list
+    let _current_pos = self.user_head_position[caller]
+    let _match_found = false
+    let _scan_count = 0
+    while _current_pos != 0 && _scan_count < 10001 {
+      if _current_pos == position_id {
+        _match_found = true
+      }
+      _current_pos = self.user_position_next[_current_pos]
+      _scan_count += 1
+    }
+    if !_match_found {
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    } else {
+      let _prev_pos = self.user_position_prev[position_id]
+      let _next_pos = self.user_position_next[position_id]
+      if _prev_pos != 0 {
+        self.user_position_next[_prev_pos] = _next_pos
+      }
+      if _next_pos != 0 {
+        self.user_position_prev[_next_pos] = _prev_pos
+      }
+      if self.user_head_position[caller] == position_id {
+        self.user_head_position[caller] = _next_pos
+      }
+      if self.user_tail_position[caller] == position_id {
+        self.user_tail_position[caller] = _prev_pos
+      }
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    }
+    if unlock_time > 0 {
+      self.total_locked_lp -= lp_amount
+    }
+
+    require(self.reserve_a >= amount_a, "reserve_a underflow")
+    require(self.reserve_b >= amount_b, "reserve_b underflow")
+
+    self.reserve_a -= amount_a
+    self.reserve_b -= amount_b
+
+    require(call(self.token_a, "transfer", [caller, amount_a]), "token_a transfer failed")
+    require(call(self.token_b, "transfer", [caller, amount_b]), "token_b transfer failed")
+
+    self.locked = false
+    emit RemoveLiquidity(caller, amount_a, amount_b, lp_amount)
+    emit PositionRemoved(position_id, caller, lp_amount)
+    emit Sync(self.reserve_a, self.reserve_b)
+    return (amount_a, amount_b)
+  }
+
+  fn close_position(min_a: int, min_b: int, deadline: int): (int, int) {
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    require(self.active, "pool not active")
+    require(!self.locked, "reentrancy guard")
+    require(self.total_lp > 0, "no liquidity")
+
+    let position_count = self.position_owner_count[caller]
+    require(position_count > 0, "no positions")
+
+    // Find first unlocked position via linked list
+    let position_id = 0
+    let unlock_time = 0
+    let found = false
+    let pos_id = self.user_head_position[caller]
+    while pos_id != 0 && !found {
+      let liquidity = self.position_liquidities[pos_id]
+      let pos_unlock = self.position_unlock_times[pos_id]
+      if liquidity > 0 && epoch >= pos_unlock {
+        position_id = pos_id
+        unlock_time = pos_unlock
+        found = true
+      }
+      pos_id = self.user_position_next[pos_id]
+    }
+    require(found, "no unlocked positions")
+
+    let lp_bal = self.position_liquidities[position_id]
+
+    self.locked = true
+
+    let amt_prod_a = lp_bal * self.reserve_a
+    if lp_bal > 0 {
+      require(amt_prod_a / lp_bal == self.reserve_a, "amount_a overflow")
+    }
+    let amount_a = amt_prod_a / self.total_lp
+    let amt_prod_b = lp_bal * self.reserve_b
+    if lp_bal > 0 {
+      require(amt_prod_b / lp_bal == self.reserve_b, "amount_b overflow")
+    }
+    let amount_b = amt_prod_b / self.total_lp
+    require(amount_a > 0 && amount_b > 0, "zero output")
+    require(amount_a >= min_a, "amount_a below minimum")
+    require(amount_b >= min_b, "amount_b below minimum")
+
+    // CEI pattern
+    self.position_owners[position_id] = ""
+    self.position_liquidities[position_id] = 0
+    self.position_unlock_times[position_id] = 0
+    self.total_lp -= lp_bal
+    self.total_liquidity -= lp_bal
+
+    self.position_owner_count[caller] -= 1
+
+    // Unlink from user's position linked list
+    let _current_pos2 = self.user_head_position[caller]
+    let _match_found2 = false
+    let _scan_count2 = 0
+    while _current_pos2 != 0 && _scan_count2 < 10001 {
+      if _current_pos2 == position_id {
+        _match_found2 = true
+      }
+      _current_pos2 = self.user_position_next[_current_pos2]
+      _scan_count2 += 1
+    }
+    if !_match_found2 {
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    } else {
+      let _prev_pos2 = self.user_position_prev[position_id]
+      let _next_pos2 = self.user_position_next[position_id]
+      if _prev_pos2 != 0 {
+        self.user_position_next[_prev_pos2] = _next_pos2
+      }
+      if _next_pos2 != 0 {
+        self.user_position_prev[_next_pos2] = _prev_pos2
+      }
+      if self.user_head_position[caller] == position_id {
+        self.user_head_position[caller] = _next_pos2
+      }
+      if self.user_tail_position[caller] == position_id {
+        self.user_tail_position[caller] = _prev_pos2
+      }
+      self.user_position_prev[position_id] = 0
+      self.user_position_next[position_id] = 0
+    }
+    if unlock_time > 0 {
+      self.total_locked_lp -= lp_bal
+    }
+
+    require(self.reserve_a >= amount_a, "reserve_a underflow")
+    require(self.reserve_b >= amount_b, "reserve_b underflow")
+
+    self.reserve_a -= amount_a
+    self.reserve_b -= amount_b
+
+    require(call(self.token_a, "transfer", [caller, amount_a]), "token_a transfer failed")
+    require(call(self.token_b, "transfer", [caller, amount_b]), "token_b transfer failed")
+
+    self.locked = false
+    emit RemoveLiquidity(caller, amount_a, amount_b, lp_bal)
+    emit PositionRemoved(position_id, caller, lp_bal)
+    emit Sync(self.reserve_a, self.reserve_b)
+    return (amount_a, amount_b)
+  }
+
+  // ===== Swaps =====
+
+  fn swap_a_for_b(amount_in: int, min_out: int, deadline: int): int {
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    require(self.active, "pool not active")
+    require(!self.locked, "reentrancy guard")
+    require(amount_in > 0, "zero input")
+    require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
+    require(self.token_a != "" && self.token_b != "", "tokens not set")
+
+    self.locked = true
+
+    // Fee-on-transfer safe
+    let bal_before = call(self.token_a, "balance_of", [self_addr])
+    require(call(self.token_a, "pull", [caller, self_addr, amount_in]), "token_a pull failed")
+    let bal_after = call(self.token_a, "balance_of", [self_addr])
+    let actual_in = bal_after - bal_before
+    require(actual_in > 0, "zero tokens received (fee-on-transfer)")
+
+    let raw_fee = actual_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == actual_in, "fee amount overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
+    let amount_in_after_fee = actual_in - fee_amount
+
+    let raw_out = amount_in_after_fee * self.reserve_b
+    if amount_in_after_fee > 0 {
+      require(raw_out / amount_in_after_fee == self.reserve_b, "out calculation overflow")
+    }
+    let out = raw_out / (self.reserve_a + amount_in_after_fee)
+
+    require(out >= min_out, "slippage too high")
+    require(out > 0, "output too small")
+    require(out < self.reserve_b - 1000, "swap would drain pool below minimum liquidity")
+
+    let k_before = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_before / self.reserve_a == self.reserve_b, "reserve overflow detected")
+    }
+
+    self.reserve_a += amount_in_after_fee
+    let new_fee_a = self.fee_reserve_a + fee_amount
+    require(new_fee_a > self.fee_reserve_a, "fee_reserve_a overflow")
+    self.fee_reserve_a = new_fee_a
+
+    require(self.reserve_b > out, "reserve_b underflow")
+    self.reserve_b -= out
+
+    let k_after = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_after / self.reserve_a == self.reserve_b, "post-swap overflow")
+    }
+    require(k_after >= k_before, "invariant violation")
+
+    require(call(self.token_b, "transfer", [caller, out]), "token_b transfer failed")
+
+    // Update TWAP
+    if self.twap_last_update_epoch > 0 && self.reserve_a > 0 && self.reserve_b > 0 {
+      let twap_elapsed = epoch - self.twap_last_update_epoch
+      if twap_elapsed > 0 {
+        let twap_price_a = self.reserve_b * 1000000 / self.reserve_a
+        let twap_price_b = self.reserve_a * 1000000 / self.reserve_b
+        self.twap_price_cumulative_a += twap_price_a * twap_elapsed
+        self.twap_price_cumulative_b += twap_price_b * twap_elapsed
+      }
+    }
+    self.twap_last_update_epoch = epoch
+
+    self.locked = false
+    emit Swap(caller, self.token_a, amount_in, out)
+    emit Sync(self.reserve_a, self.reserve_b)
+    return out
+  }
+
+  fn swap_b_for_a(amount_in: int, min_out: int, deadline: int): int {
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    require(self.active, "pool not active")
+    require(!self.locked, "reentrancy guard")
+    require(amount_in > 0, "zero input")
+    require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
+    require(self.token_a != "" && self.token_b != "", "tokens not set")
+
+    self.locked = true
+
+    // Fee-on-transfer safe
+    let bal_before = call(self.token_b, "balance_of", [self_addr])
+    require(call(self.token_b, "pull", [caller, self_addr, amount_in]), "token_b pull failed")
+    let bal_after = call(self.token_b, "balance_of", [self_addr])
+    let actual_in = bal_after - bal_before
+    require(actual_in > 0, "zero tokens received (fee-on-transfer)")
+
+    let raw_fee = actual_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == actual_in, "fee amount overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
+    let amount_in_after_fee = actual_in - fee_amount
+
+    let raw_out = amount_in_after_fee * self.reserve_a
+    if amount_in_after_fee > 0 {
+      require(raw_out / amount_in_after_fee == self.reserve_a, "out calculation overflow")
+    }
+    let out = raw_out / (self.reserve_b + amount_in_after_fee)
+
+    require(out >= min_out, "slippage too high")
+    require(out > 0, "output too small")
+    require(out < self.reserve_a - 1000, "swap would drain pool below minimum liquidity")
+
+    let k_before = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_before / self.reserve_a == self.reserve_b, "reserve overflow detected")
+    }
+
+    self.reserve_b += amount_in_after_fee
+    let new_fee_b = self.fee_reserve_b + fee_amount
+    require(new_fee_b > self.fee_reserve_b, "fee_reserve_b overflow")
+    self.fee_reserve_b = new_fee_b
+
+    require(self.reserve_a > out, "reserve_a underflow")
+    self.reserve_a -= out
+
+    let k_after = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(k_after / self.reserve_a == self.reserve_b, "post-swap overflow")
+    }
+    require(k_after >= k_before, "invariant violation")
+
+    require(call(self.token_a, "transfer", [caller, out]), "token_a transfer failed")
+
+    // Update TWAP
+    if self.twap_last_update_epoch > 0 && self.reserve_a > 0 && self.reserve_b > 0 {
+      let twap_elapsed = epoch - self.twap_last_update_epoch
+      if twap_elapsed > 0 {
+        let twap_price_a = self.reserve_b * 1000000 / self.reserve_a
+        let twap_price_b = self.reserve_a * 1000000 / self.reserve_b
+        self.twap_price_cumulative_a += twap_price_a * twap_elapsed
+        self.twap_price_cumulative_b += twap_price_b * twap_elapsed
+      }
+    }
+    self.twap_last_update_epoch = epoch
+
+    self.locked = false
+    emit Swap(caller, self.token_b, amount_in, out)
+    emit Sync(self.reserve_a, self.reserve_b)
+    return out
+  }
+
+  // ===== Reward Claiming =====
+
+  fn claim_reward(position_id: int): int {
+    require(self.reward_configured, "reward not configured")
+    require(self.active, "pool not active")
+    require(position_id > 0, "invalid position")
+    require(self.position_owners[position_id] == caller, "not position owner")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+
+    let lp_amount = self.position_liquidities[position_id]
+    require(lp_amount > 0, "no liquidity")
+
+    let last_claim = self.last_claim_epoch[position_id]
+    if last_claim == 0 {
+      last_claim = self.reward_start_epoch
+    }
+
+    // Cap at reward end
+    let current_end = epoch
+    if current_end > self.reward_end_epoch {
+      current_end = self.reward_end_epoch
+    }
+
+    let elapsed = current_end - last_claim
+    if elapsed <= 0 {
+      self.locked = false
+      return 0
+    }
+
+    // Linear: reward = per_epoch × elapsed × user_lp / total_lp
+    let reward = self.reward_per_epoch * elapsed * lp_amount / self.total_lp
+
+    // Cap at remaining
+    if reward > self.reward_remaining {
+      reward = self.reward_remaining
+    }
+
+    if reward > 0 {
+      self.last_claim_epoch[position_id] = current_end
+      self.reward_remaining = self.reward_remaining - reward
+      require(call(self.reward_token, "transfer", [caller, reward]), "reward transfer failed")
+      emit RewardClaimed(position_id, caller, reward)
+    }
+
+    self.locked = false
+    return reward
+  }
+
+  // ===== Emergency Withdraw =====
+
+  fn emergency_withdraw(): int {
+    require(self.reward_configured, "reward not configured")
+    require(caller == self.creator, "not authorized")
+    require(epoch >= self.emergency_available_after, "cooldown active")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+
+    let remaining = self.reward_remaining
+    require(remaining > 0, "no remaining rewards")
+
+    self.reward_remaining = 0
+    require(call(self.reward_token, "transfer", [caller, remaining]), "emergency transfer failed")
+    self.active = false
+
+    emit EmergencyWithdraw(remaining)
+    self.locked = false
+    return remaining
+  }
+
+  // ===== Fee Management =====
+
+  fn claim_fees(recipient: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+    assert_address(recipient)
+    require(recipient != "", "zero address")
+    require(recipient != self_addr, "recipient cannot be pool")
+    require(recipient != self.token_a && recipient != self.token_b, "recipient cannot be pool's tokens")
+
+    let amt_a = self.fee_reserve_a
+    let amt_b = self.fee_reserve_b
+    require(amt_a > 0 || amt_b > 0, "no fees to claim")
+
+    if amt_a > 0 {
+      require(call(self.token_a, "transfer", [recipient, amt_a]), "token_a fee transfer failed")
+    }
+    if amt_b > 0 {
+      require(call(self.token_b, "transfer", [recipient, amt_b]), "token_b fee transfer failed")
+    }
+
+    self.fee_reserve_a = 0
+    self.fee_reserve_b = 0
+
+    self.locked = false
+    emit FeesClaimed(recipient, amt_a, amt_b)
+    return true
+  }
+
+  // ===== Admin =====
+
+  fn set_active(status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    if self.active != status {
+      self.active = status
+      emit PoolActivated(status)
+    }
+    return true
+  }
+
+  fn set_max_initial_price_ratio(ratio: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(ratio >= 0, "ratio cannot be negative")
+    let old_ratio = self.max_initial_price_ratio
+    self.max_initial_price_ratio = ratio
+    emit MaxInitialPriceRatioSet(old_ratio, ratio)
+    return true
+  }
+
+  fn set_fee_params(num: int, denom: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(denom > 0, "denominator must be > 0")
+    require(num > 0, "numerator must be > 0")
+    require(num < denom, "fee must be < 100%")
+    require(num * 1000 <= denom * 10, "fee cannot exceed 1%")
+    require(num * 10000 >= denom * 3, "fee too low (min 0.03%)")
+    let old_num = self.fee_numerator
+    let old_denom = self.fee_denominator
+    self.fee_numerator = num
+    self.fee_denominator = denom
+    emit FeeParamsSet(old_num, old_denom, num, denom)
+    return true
+  }
+
+  fn sync(): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+    let bal_a = call(self.token_a, "balance_of", [self_addr])
+    let bal_b = call(self.token_b, "balance_of", [self_addr])
+    require(bal_a >= self.reserve_a && bal_b >= self.reserve_b, "sync would reduce reserves")
+    require(bal_a >= self.fee_reserve_a, "bal_a < fee_reserve_a")
+    require(bal_b >= self.fee_reserve_b, "bal_b < fee_reserve_b")
+    self.reserve_a = bal_a - self.fee_reserve_a
+    self.reserve_b = bal_b - self.fee_reserve_b
+    self.locked = false
+    emit Sync(self.reserve_a, self.reserve_b)
+    return true
+  }
+
+  fn rescue_tokens(token: address, amount: int, to: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(token != "", "zero token address")
+    require(to != "", "zero recipient")
+    require(amount > 0, "zero amount")
+    let tracked = 0
+    if token == self.token_a {
+      tracked = self.reserve_a + self.fee_reserve_a
+    } else if token == self.token_b {
+      tracked = self.reserve_b + self.fee_reserve_b
+    }
+    let actual_bal = call(token, "balance_of", [self_addr])
+    require(actual_bal > tracked, "no excess tokens to rescue")
+    let rescueable = actual_bal - tracked
+    require(amount <= rescueable, "amount exceeds rescueable balance")
+    require(call(token, "transfer", [to, amount]), "rescue transfer failed")
+    return true
+  }
+
+  // ===== Ownership =====
+
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    assert_address(new_owner)
+    require(new_owner != "", "new owner is zero address")
+    self.pending_owner = new_owner
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    require(!self.locked, "reentrancy guard")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  fn set_max_positions_per_user(limit: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    require(limit > 0, "limit must be positive")
+    require(limit <= 10000, "limit too high (max 10000)")
+    self.max_positions_per_user = limit
+    emit MaxPositionsPerUserUpdated(limit)
+    return true
+  }
+
+  // ===== View Functions =====
+
+  view fn get_reserves(): (int, int) {
+    return (self.reserve_a, self.reserve_b)
+  }
+
+  view fn get_price_a_in_b(): int {
+    require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
+    return self.reserve_b * 1000000 / self.reserve_a
+  }
+
+  view fn get_price(): int {
+    require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
+    return self.reserve_b * 1000000 / self.reserve_a
+  }
+
+  view fn get_amount_out(amount_in: int, is_a_to_b: bool): int {
+    require(amount_in > 0, "zero input")
+    require(self.reserve_a > 0 && self.reserve_b > 0, "no liquidity")
+    let raw_fee = amount_in * self.fee_numerator
+    if self.fee_numerator > 0 {
+      require(raw_fee / self.fee_numerator == amount_in, "fee overflow")
+    }
+    let fee_amount = raw_fee / self.fee_denominator
+    let amount_in_after_fee = amount_in - fee_amount
+    if is_a_to_b {
+      let raw_out = amount_in_after_fee * self.reserve_b
+      if amount_in_after_fee > 0 {
+        require(raw_out / amount_in_after_fee == self.reserve_b, "out overflow")
+      }
+      return raw_out / (self.reserve_a + amount_in_after_fee)
+    }
+    let raw_out2 = amount_in_after_fee * self.reserve_a
+    if amount_in_after_fee > 0 {
+      require(raw_out2 / amount_in_after_fee == self.reserve_a, "out overflow")
+    }
+    return raw_out2 / (self.reserve_b + amount_in_after_fee)
+  }
+
+  view fn get_lp_balance(addr: address): int {
+    let total = 0
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      total += self.position_liquidities[pos_id]
+      pos_id = self.user_position_next[pos_id]
+    }
+    return total
+  }
+
+  view fn total_lp_supply(): int {
+    return self.total_lp
+  }
+
+  view fn get_pool_info(): (address, address, int, int, int, bool, int) {
+    return (self.token_a, self.token_b, self.reserve_a, self.reserve_b, self.total_lp, self.active, self.next_position_id)
+  }
+
+  view fn get_token_a(): address {
+    return self.token_a
+  }
+
+  view fn get_token_b(): address {
+    return self.token_b
+  }
+
+  view fn get_k(): int {
+    let product = self.reserve_a * self.reserve_b
+    if self.reserve_a > 0 {
+      require(product / self.reserve_a == self.reserve_b, "k overflow")
+    }
+    return product
+  }
+
+  view fn get_fee_reserves(): (int, int) {
+    return (self.fee_reserve_a, self.fee_reserve_b)
+  }
+
+  view fn get_fee_params(): (int, int) {
+    return (self.fee_numerator, self.fee_denominator)
+  }
+
+  view fn get_pending_owner(): address {
+    return self.pending_owner
+  }
+
+  view fn get_position(id: int): (address, int, int) {
+    return (self.position_owners[id], self.position_liquidities[id], self.position_unlock_times[id])
+  }
+
+  view fn get_position_count(addr: address): int {
+    return self.position_owner_count[addr]
+  }
+
+  view fn get_unlocked_liquidity(addr: address): int {
+    let total = 0
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      if epoch >= self.position_unlock_times[pos_id] {
+        total += self.position_liquidities[pos_id]
+      }
+      pos_id = self.user_position_next[pos_id]
+    }
+    return total
+  }
+
+  view fn get_locked_liquidity(addr: address): int {
+    let total = 0
+    let pos_id = self.user_head_position[addr]
+    while pos_id != 0 {
+      if epoch < self.position_unlock_times[pos_id] {
+        total += self.position_liquidities[pos_id]
+      }
+      pos_id = self.user_position_next[pos_id]
+    }
+    return total
+  }
+
+  view fn get_total_locked_lp(): int {
+    return self.total_locked_lp
+  }
+
+  view fn get_position_unlock_time(id: int): int {
+    return self.position_unlock_times[id]
+  }
+
+  view fn get_next_position_id(): int {
+    return self.next_position_id
+  }
+
+  view fn get_max_positions_per_user(): int {
+    return self.max_positions_per_user
+  }
+
+  // ===== Reward Views =====
+
+  view fn get_reward_info(): (address, int, int, int, int, int, int, address, int) {
+    return (
+      self.reward_token,
+      self.reward_total,
+      self.reward_remaining,
+      self.reward_per_epoch,
+      self.reward_start_epoch,
+      self.reward_end_epoch,
+      self.distribution_type,
+      self.creator,
+      self.creator_lock_end
+    )
+  }
+
+  view fn get_claimable(position_id: int): int {
+    if !self.reward_configured { return 0 }
+    let lp_amount = self.position_liquidities[position_id]
+    if lp_amount <= 0 { return 0 }
+    let last_claim = self.last_claim_epoch[position_id]
+    if last_claim == 0 { last_claim = self.reward_start_epoch }
+    let current_end = epoch
+    if current_end > self.reward_end_epoch { current_end = self.reward_end_epoch }
+    let elapsed = current_end - last_claim
+    if elapsed <= 0 { return 0 }
+    return self.reward_per_epoch * elapsed * lp_amount / self.total_lp
+  }
+
+  view fn get_reward_token(): address {
+    return self.reward_token
+  }
+
+  view fn is_reward_configured(): bool {
+    return self.reward_configured
+  }
+
+  view fn get_emergency_available_after(): int {
+    return self.emergency_available_after
+  }
+
+  view fn get_last_claim_epoch(position_id: int): int {
+    return self.last_claim_epoch[position_id]
+  }
+
+  // ===== TWAP =====
+
+  view fn get_twap(): (int, int) {
+    if self.twap_last_update_epoch == 0 || self.reserve_a == 0 || self.reserve_b == 0 {
+      return (0, 0)
+    }
+    let elapsed = epoch - self.twap_last_update_epoch
+    if elapsed == 0 { elapsed = 1 }
+    let avg_a = self.twap_price_cumulative_a / elapsed
+    let avg_b = self.twap_price_cumulative_b / elapsed
+    return (avg_a, avg_b)
+  }
+}

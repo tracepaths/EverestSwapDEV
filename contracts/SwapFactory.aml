@@ -30,6 +30,9 @@ contract SwapFactory {
     voter_weight: map[address]map[address]int      // voter -> token -> vote weight used
     // [SECURITY] MEDIUM-8: Reentrancy guard for functions with external calls
     locked: bool
+    // [V9] Reward Pool support
+    pool_reward_token: map[address]address   // pool_addr → reward_token
+    reward_pools: list[address]             // list of reward pools
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
@@ -422,6 +425,59 @@ contract SwapFactory {
 
     require(lhs <= rhs, "initial price misaligned with equilibrium")
     return true
+  }
+
+  // [V9] register_reward_pool: Permissionless — anyone can deploy & register a reward pool.
+  fn register_reward_pool(token_a: address, token_b: address, reward_token: address, pool: address): bool {
+    require(!self.paused, "factory paused")
+    require(token_a != token_b, "identical tokens")
+    require(reward_token != token_a && reward_token != token_b, "reward token is pair token")
+    require(pool != "", "zero pool address")
+    assert_address(token_a)
+    assert_address(token_b)
+    assert_address(reward_token)
+
+    require(self.pool_token_pair[pool] == "" || self.pool_token_pair[pool] == "0", "pool already registered")
+
+    // Verify pool is a genuine SwapPool/RewardPool for this pair
+    require(call(pool, "get_token_a", []) == token_a, "pool token_a mismatch")
+    require(call(pool, "get_token_b", []) == token_b, "pool token_b mismatch")
+
+    // Validate no existing pool for this pair
+    require(self.pools_by_pair[token_a][token_b] == "" || self.pools_by_pair[token_a][token_b] == "0", "pool already exists for this pair")
+    require(self.pools_by_pair[token_b][token_a] == "" || self.pools_by_pair[token_b][token_a] == "0", "pool already exists for this pair")
+
+    // Map pool in both directions
+    self.pools_by_pair[token_a][token_b] = pool
+    self.pools_by_pair[token_b][token_a] = pool
+
+    self.pool_token_pair[pool] = token_a
+    self.pool_token_b_map[pool] = token_b
+    self.pool_reward_token[pool] = reward_token
+
+    self.pools.push(pool)
+    self.reward_pools.push(pool)
+    let pool_id = self.pool_count
+    self.pool_count = pool_id + 1
+    emit PoolCreated(token_a, token_b, pool, pool_id)
+    return true
+  }
+
+  // [V9] Reward pool views
+  view fn get_reward_token(pool: address): address {
+    return self.pool_reward_token[pool]
+  }
+
+  view fn get_reward_pools(): list[address] {
+    return self.reward_pools
+  }
+
+  view fn is_reward_pool(pool: address): bool {
+    let token = self.pool_reward_token[pool]
+    if token != "" && token != "0" {
+      return true
+    }
+    return false
   }
 
   // [V8] Trust rating — LP-weighted community voting

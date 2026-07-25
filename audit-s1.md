@@ -283,6 +283,32 @@ let actual = bal_after - bal_before
 
 ---
 
+## RewardPool.aml (V9 — New Contract)
+
+### S1-RP-01: Reward Configuration One-Shot [MEDIUM] ✅ BY DESIGN
+
+**Description:** `set_reward_config()` can only be called once. If called with incorrect parameters, the pool cannot be corrected.
+
+**Impact:** Incorrect reward configuration (wrong token, amount, or duration) cannot be fixed. Pool must be abandoned and redeployed.
+
+**Recommendation:** This is intentional anti-rugpull protection. Document clearly in UI that config is immutable.
+
+### S1-RP-02: Emergency Withdraw Cooldown [LOW] ✅ IMPLEMENTED
+
+**Description:** `emergency_withdraw()` is only available after `reward_end` + 7-day cooldown.
+
+**Impact:** Creator cannot extract remaining rewards during distribution period, preventing rugpull.
+
+### S1-RP-03: Reward Token Drain Risk [LOW]
+
+**Description:** If reward pool runs out of reward tokens mid-distribution, remaining claimable rewards are lost.
+
+**Impact:** LP holders may not receive full expected rewards if pool is underfunded.
+
+**Recommendation:** UI should warn creators about sufficient funding. Consider optional top-up mechanism.
+
+---
+
 ## Recommendations Summary
 
 | Priority | Action | Contract |
