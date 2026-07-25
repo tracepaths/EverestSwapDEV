@@ -14,13 +14,14 @@ everestswapdev/
 - **Frontend**: `tracepaths/EverestSwap` (React + Vite app)
 - **Backend**: `tracepaths/EverestSwapDEV` (this repo — contracts, scripts, deployment)
 
-## Contract Addresses (V7 — Devnet, Redeployed 2026-06-30)
+## Contract Addresses (V9 — Devnet, Redeployed 2026-07-25)
 
 - OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD` (unchanged)
-- WOCT: `oct4pAKouypxmP7Uk79uGzEpkkidsNAK3fQhxy1HDUmBRLE`
-- SwapPool: `octHzDX3aUCvFVRifUQoPdsaXqSvRLozGqJu3wzSDk2AZ25`
-- SwapFactory: `oct6QAJuPwbfHQUb1uQBsuceQgATK5AqStqwQPhPv29BmQx`
-- Router: `oct27w262B5fscy8mRRdAtTTYrRgpR2sseJyp2HMGWYGaWW`
+- WOCT: `oct4g33tzC2cJncL5RFr9TRiyk8yCNP1h2xaogiWJS5opNv`
+- SwapPool: `oct2ws6ug4Va8R8ctPvE76zyc8fgBJDTC4BgG4WjJXCBo8R`
+- SwapFactory: `octJbkjXrAqvZdg2JZVZTyQqpYB52HYkBPDmGMmEQBMgSFE`
+- Router: `octEtQJQDFC85tXtGpERHX69rNoo1GJA7EVUaLezANQxC8K`
+- RewardPool: `octCfD5XbQwiPUH1CYcQZPJuSuNEbPTtix7LfJAepeGzSr3`
 
 ## RPC Endpoints
 
