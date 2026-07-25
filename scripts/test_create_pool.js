@@ -19,7 +19,7 @@ const CALL_FEE_OU = '1500';
 // [SECURITY] Load addresses from deployments.json; fall back to canonical OES only
 const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deployments.json'), 'utf-8'));
 const WOCT = deployments.WOCT;
-const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const OES = deployments.OES || 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 
 // Will be set after deploying V2 factory
 let FACTORY_V2 = ''; // will be set after deploy

@@ -104,7 +104,7 @@ async function main() {
 
   const addresses = loadDeployments();
   let currentNonce = nonce;
-  const OES = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+  const OES = 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 
   // 1. Compile and deploy new SwapFactory with update_pool
   console.log('1. Compiling SwapFactory...');

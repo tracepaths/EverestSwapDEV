@@ -11,7 +11,7 @@ if (!MNEMONIC) {
   process.exit(1);
 }
 
-const OES_ADDRESS = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const OES_ADDRESS = 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 const DEPLOYMENTS_PATH = path.join(__dirname, '..', 'deployments.json');
 
 // Gas fee strategy: start low, increase on failure

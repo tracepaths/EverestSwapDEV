@@ -7,7 +7,7 @@
 **Audit Iteration:** Post V7 redeploy (2026-06-30)
 
 **Redeployed Addresses (Devnet):**
-- OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD`
+- OES: `octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC`
 - WOCT: `oct4pAKouypxmP7Uk79uGzEpkkidsNAK3fQhxy1HDUmBRLE`
 - SwapFactory: `oct6QAJuPwbfHQUb1uQBsuceQgATK5AqStqwQPhPv29BmQx`
 - SwapPool: `octHzDX3aUCvFVRifUQoPdsaXqSvRLozGqJu3wzSDk2AZ25`

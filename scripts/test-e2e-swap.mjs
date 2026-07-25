@@ -12,7 +12,7 @@ const RPC = process.env.RPC_URL || 'https://devnet.octrascan.io/rpc';
 const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deployments.json'), 'utf-8'));
 const WOCT = deployments.WOCT;
 const POOL = deployments.SwapPool;
-const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const OES = deployments.OES || 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 if (!WOCT || !POOL) {
   throw new Error('Required addresses missing in deployments.json (SwapPool, WOCT)');
 }

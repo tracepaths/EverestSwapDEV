@@ -18,7 +18,7 @@ const deployments = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'deplo
 const FACTORY_V2 = deployments.SwapFactory;
 const USER_POOL = deployments.SwapPool;
 const WOCT = deployments.WOCT;
-const OES = deployments.OES || 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const OES = deployments.OES || 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 if (!FACTORY_V2 || !USER_POOL || !WOCT) {
   throw new Error('Required addresses missing in deployments.json (SwapFactory, SwapPool, WOCT)');
 }

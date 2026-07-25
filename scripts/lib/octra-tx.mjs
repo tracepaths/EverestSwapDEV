@@ -22,7 +22,7 @@ const bs58Encode = (input) =>
 
 // ── Network constants (canonical deployment on devnet) ────────────────
 export const WOCT_ADDRESS = 'octLtzi5z7Ls6BFdrBgdGQKiqBKxDPojpfHLpWhHfbDbF8c';
-export const OES_ADDRESS  = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+export const OES_ADDRESS  = 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 export const FACTORY_ADDRESS = 'octF2kc1Spgxo6BsUazFrg4gCYUMLffEPbcReg6SmmApa2F';
 export const ROUTER_ADDRESS  = 'octAAy94fnLmCavamhcL3LVHB7pa2amxv9By53UqNGMLDgr';
 

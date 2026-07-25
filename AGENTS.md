@@ -16,7 +16,7 @@ everestswapdev/
 
 ## Contract Addresses (V9 — Devnet, Redeployed 2026-07-25)
 
-- OES: `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD` (unchanged)
+- OES: `octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC` (redeployed 2026-07-25, owner: oct2mhQQYM3MmDwMxbcpvTCMgSVPxh47YUdZGn3aR1r13PK)
 - WOCT: `oct4g33tzC2cJncL5RFr9TRiyk8yCNP1h2xaogiWJS5opNv`
 - SwapPool: `oct2ws6ug4Va8R8ctPvE76zyc8fgBJDTC4BgG4WjJXCBo8R`
 - SwapFactory: `octJbkjXrAqvZdg2JZVZTyQqpYB52HYkBPDmGMmEQBMgSFE`

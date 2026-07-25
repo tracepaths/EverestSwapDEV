@@ -80,7 +80,7 @@ async function main() {
     timestamp: Date.now() / 1000,
     op_type: 'call',
     encrypted_data: 'set_tokens',
-    message: JSON.stringify(['oct00000000000000000000000000000000000000000000', 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD'])
+    message: JSON.stringify(['oct00000000000000000000000000000000000000000000', 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC'])
   };
   const callJson = canonicalTxJson(callTx);
   console.log('Canonical JSON:', callJson);

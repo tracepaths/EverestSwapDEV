@@ -17,7 +17,7 @@ const FEE_OU = '100000';
 // [V7-DEPLOY] CLI flags
 const FORCE = process.argv.includes('--force');
 const OPTION = process.argv.find(a => a.startsWith('--option='))?.split('=')[1];
-const OES_ADDRESS = 'oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD';
+const OES_ADDRESS = 'octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC';
 const DEPLOYMENTS_PATH = path.join(__dirname, '..', 'deployments.json');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

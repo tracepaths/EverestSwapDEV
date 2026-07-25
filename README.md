@@ -21,7 +21,7 @@ Smart contracts, deployment scripts, and tooling for EverestSwap DEX on Octra Ne
 
 | Contract | Address |
 |---|---|
-| OES Token | `oct9LgGSpkrqbpWPQpYervyryzDtbGYph2hHvcBi9ZppNvD` |
+| OES Token | `octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC` |
 | WOCT | `oct3taQXSQetRSmq21hfLmc1ormx7svm112cUB5uEze3oVe` |
 | SwapPool | `octFh3NNUj2JmAorPcrLfcy4bzf5tdk88qDCdFnmjHt12X3` |
 | SwapFactory | `octFmVqADVjj8v1WSr4ex6EJd2TPRf1JjUVHb3tK29YTXTV` |
