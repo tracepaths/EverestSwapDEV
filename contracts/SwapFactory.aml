@@ -254,10 +254,94 @@ contract SwapFactory {
     return true
   }
 
+  // [V10] remove_pool: Allows the pool creator (owner) to deregister a pool from the factory.
+  // Safety requirements:
+  //   1. Caller must be the pool's owner (creator). Only fee_to_setter can bypass (emergency).
+  //   2. Pool must have zero reserves (fully drained) to protect LPs.
+  //   3. Pool must have zero total_lp (no active liquidity positions).
+  // This prevents rug-pulls: a creator cannot remove a pool that still has user funds.
+  // After removal the factory no longer routes to this pool; the pool contract itself persists.
+  event PoolDeregistered(token_a: address, token_b: address, pool: address, removed_by: address)
+
+  fn remove_pool(pool: address): bool {
+    require(!self.paused, "factory paused")
+    require(pool != "", "zero pool address")
+    assert_address(pool)
+
+    // Verify pool is actually registered
+    let token_a = self.pool_token_pair[pool]
+    require(token_a != "" && token_a != "0", "pool not registered")
+    let token_b = self.pool_token_b_map[pool]
+
+    // Auth: caller must be pool owner (creator) OR the factory fee_to_setter
+    let pool_owner = call(pool, "owner", [])
+    let is_authorized = (caller == pool_owner || caller == self.fee_to_setter)
+    require(is_authorized, "not pool owner or admin")
+
+    // Safety: pool must be fully drained (no reserves)
+    // This prevents a creator from removing a pool that still has LP funds
+    let reserve_a = call(pool, "reserve_a", [])
+    let reserve_b = call(pool, "reserve_b", [])
+    require(reserve_a == 0 || reserve_a == "0", "pool still has token_a reserves")
+    require(reserve_b == 0 || reserve_b == "0", "pool still has token_b reserves")
+
+    // Safety: no active LP positions
+    let total_lp = call(pool, "total_lp", [])
+    require(total_lp == 0 || total_lp == "0", "pool still has active LP positions")
+
+    // Remove from pools_by_pair map (both directions)
+    self.pools_by_pair[token_a][token_b] = ""
+    self.pools_by_pair[token_b][token_a] = ""
+
+    // Clear pool metadata
+    self.pool_token_pair[pool] = ""
+    self.pool_token_b_map[pool] = ""
+
+    // Clear reward pool metadata if applicable
+    if self.pool_reward_token[pool] != "" && self.pool_reward_token[pool] != "0" {
+      self.pool_reward_token[pool] = ""
+    }
+
+    // Remove from pools list using swap-pop (O(1) removal)
+    let i = 0
+    while i < len(self.pools) {
+      if self.pools[i] == pool {
+        let last_idx = len(self.pools) - 1
+        if i != last_idx {
+          let last_pool = self.pools[last_idx]
+          self.pools[i] = last_pool
+        }
+        self.pools.pop()
+        self.pool_count = self.pool_count - 1
+        break
+      }
+      i += 1
+    }
+
+    // Remove from reward_pools list if present
+    let j = 0
+    while j < len(self.reward_pools) {
+      if self.reward_pools[j] == pool {
+        let last_idx_r = len(self.reward_pools) - 1
+        if j != last_idx_r {
+          let last_rpool = self.reward_pools[last_idx_r]
+          self.reward_pools[j] = last_rpool
+        }
+        self.reward_pools.pop()
+        break
+      }
+      j += 1
+    }
+
+    emit PoolDeregistered(token_a, token_b, pool, caller)
+    return true
+  }
+
   view fn get_pool(token_a: address, token_b: address): address {
     let pool = self.pools_by_pair[token_a][token_b]
     if pool != "" && pool != "0" {
       return pool
+
     }
     let pool2 = self.pools_by_pair[token_b][token_a]
     if pool2 != "" && pool2 != "0" {
