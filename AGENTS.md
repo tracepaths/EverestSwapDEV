@@ -23,6 +23,15 @@ everestswapdev/
 - Router: `octEtQJQDFC85tXtGpERHX69rNoo1GJA7EVUaLezANQxC8K`
 - RewardPool: `octCfD5XbQwiPUH1CYcQZPJuSuNEbPTtix7LfJAepeGzSr3`
 
+## CAT Token (Deployed 2026-07-27)
+
+- CAT: `octEw9XG14HA5f15mKLr3PYFbXyqMTLgDninhxrZUtyPvPe` (100B supply, 6 decimals, deployer: octDLQFPawcje9rSTXxbaf8mihhMBb5QfXUpwthxmrH1Yia)
+- CAT_Pool: `octEuicdod5B7kfZa6JQsvEpu3yyTpKh9P6vhNRLotPyMz7` (WOCT/CAT, 1 OCT : 1000 CAT, max_initial_price_ratio=1000, registered on factory)
+- Liquidity: 70% position retained (~700,032 WOCT : ~700,031,737 CAT), 30% position removed
+- Scripts: `scripts/deploy-cat.js` (full deploy), `scripts/fix-cat-liquidity.js` (split-position liquidity fix)
+- NOTE: `remove_liquidity(position_id, ...)` removes the ENTIRE position — no partial-amount parameter. For "remove sebagian", add liquidity as multiple positions and remove one.
+- NOTE: Devnet fees are dynamic — fetch via `octra_recommendedFee(opType)` (deploy ≈ 200000, call ≈ 1000). Old hardcoded `FEE_OU='100000'` fails with "fee too low".
+
 ## RPC Endpoints
 
 - Devnet: `https://devnet.octrascan.io/rpc`
