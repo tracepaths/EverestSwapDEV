@@ -119,7 +119,13 @@ contract SwapPool {
   // [SECURITY] H-1: All calculations and validations are done BEFORE any external call,
   // so if the user-provided amounts or min_lp result in a revert, the user's tokens
   // have not yet been pulled.
-  fn add_liquidity(amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
+  // [V11] Factory-first: add_liquidity_for lets the pool owner (the deploying
+  // factory) mint the initial LP position directly to a recipient. Tokens are
+  // always pulled from the caller (the factory must hold both amounts first).
+  // Direct callers may only credit themselves (recipient == caller).
+  fn add_liquidity_for(recipient: address, amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
+    require(recipient == caller || caller == self.owner, "not authorized")
+    assert_address(recipient)
     // [AUDIT-FIX MED-1] Deadline check - enforce 5-minute max
     require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
     require(self.active, "pool not active")
@@ -132,7 +138,7 @@ contract SwapPool {
     // 365 days = 365 * 24 * 60 = 525,600 minutes
     require(lock_duration <= 525600, "lock_duration too long (max 365 days)")
     // [SECURITY] Per-user position cap to prevent DoS
-    require(self.position_owner_count[caller] < self.max_positions_per_user, "max positions reached")
+    require(self.position_owner_count[recipient] < self.max_positions_per_user, "max positions reached")
 
     self.locked = true
 
@@ -209,29 +215,29 @@ contract SwapPool {
       self.total_lp = lp_raw  // total including burned portion
       self.total_liquidity = lp
 
-      // [V7] Create position for caller
+      // [V7] Create position for recipient
       let position_id = self.next_position_id
       self.next_position_id += 1
       let unlock_epoch = 0
       if lock_duration > 0 {
         unlock_epoch = epoch + lock_duration
       }
-      self.position_owners[position_id] = caller
+      self.position_owners[position_id] = recipient
       self.position_liquidities[position_id] = lp
       self.position_unlock_times[position_id] = unlock_epoch
-      self.position_owner_count[caller] += 1
+      self.position_owner_count[recipient] += 1
       // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
       require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
-      let _prev_tail = self.user_tail_position[caller]
+      let _prev_tail = self.user_tail_position[recipient]
       if _prev_tail == 0 {
-        self.user_head_position[caller] = position_id
-        self.user_tail_position[caller] = position_id
+        self.user_head_position[recipient] = position_id
+        self.user_tail_position[recipient] = position_id
         self.user_position_prev[position_id] = 0
         self.user_position_next[position_id] = 0
       } else {
         self.user_position_next[_prev_tail] = position_id
         self.user_position_prev[position_id] = _prev_tail
-        self.user_tail_position[caller] = position_id
+        self.user_tail_position[recipient] = position_id
         self.user_position_next[position_id] = 0
       }
       // [SECURITY] C-1: Increment total_locked_lp if position was created with a lock
@@ -243,7 +249,7 @@ contract SwapPool {
 
       self.locked = false
       emit AddLiquidity(caller, amount_a, amount_b, lp)
-      emit PositionAdded(position_id, caller, lp, unlock_epoch)
+      emit PositionAdded(position_id, recipient, lp, unlock_epoch)
       emit Sync(self.reserve_a, self.reserve_b)
       return (lp, amount_a, amount_b)
     }
@@ -308,29 +314,29 @@ contract SwapPool {
     self.total_lp += lp_amount
     self.total_liquidity += lp_amount
 
-    // [V7] Create position for caller
+    // [V7] Create position for recipient
     let position_id = self.next_position_id
     self.next_position_id += 1
     let unlock_epoch = 0
     if lock_duration > 0 {
       unlock_epoch = epoch + lock_duration
     }
-    self.position_owners[position_id] = caller
+    self.position_owners[position_id] = recipient
     self.position_liquidities[position_id] = lp_amount
     self.position_unlock_times[position_id] = unlock_epoch
-    self.position_owner_count[caller] += 1
+    self.position_owner_count[recipient] += 1
     // [SECURITY] Link into user's position linked list (inlined — AML doesn't support self.fn() calls)
     require(self.user_position_prev[position_id] == 0 && self.user_position_next[position_id] == 0, "position already linked")
-    let _prev_tail = self.user_tail_position[caller]
+    let _prev_tail = self.user_tail_position[recipient]
     if _prev_tail == 0 {
-      self.user_head_position[caller] = position_id
-      self.user_tail_position[caller] = position_id
+      self.user_head_position[recipient] = position_id
+      self.user_tail_position[recipient] = position_id
       self.user_position_prev[position_id] = 0
       self.user_position_next[position_id] = 0
     } else {
       self.user_position_next[_prev_tail] = position_id
       self.user_position_prev[position_id] = _prev_tail
-      self.user_tail_position[caller] = position_id
+      self.user_tail_position[recipient] = position_id
       self.user_position_next[position_id] = 0
     }
     // [SECURITY] C-1: Increment total_locked_lp if position was created with a lock
@@ -342,7 +348,7 @@ contract SwapPool {
     // the external refund calls. The single-bool reentrancy guard must remain held
     // until ALL external calls are complete.
     emit AddLiquidity(caller, used_a, used_b, lp_amount)
-    emit PositionAdded(position_id, caller, lp_amount, unlock_epoch)
+    emit PositionAdded(position_id, recipient, lp_amount, unlock_epoch)
     emit Sync(self.reserve_a, self.reserve_b)
 
     // Refund excess tokens AFTER state is fully committed, while still holding lock
@@ -357,6 +363,11 @@ contract SwapPool {
     self.locked = false
 
     return (lp_amount, used_a, used_b)
+  }
+
+  // [V11] Direct-entry wrapper: caller adds liquidity for themselves.
+  fn add_liquidity(amount_a: int, amount_b: int, min_lp: int, deadline: int, lock_duration: int): (int, int, int) {
+    return add_liquidity_for(caller, amount_a, amount_b, min_lp, deadline, lock_duration)
   }
 
   fn remove_liquidity(position_id: int, min_a: int, min_b: int, deadline: int): (int, int) {

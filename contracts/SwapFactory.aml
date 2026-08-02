@@ -33,9 +33,24 @@ contract SwapFactory {
     // [V9] Reward Pool support
     pool_reward_token: map[address]address   // pool_addr → reward_token
     reward_pools: list[address]             // list of reward pools
+    // [V11] Factory-first deployment: bytecode templates for atomically spawned
+    // contracts (stored as base64 bytecode from octra_compileAml).
+    pool_template: string
+    token_template: string
+    // [V11] Reference token for launch(): the wrapped-OCT side of new pools.
+    woct_token: address
+    // [V11] Spawn counter — mirrors the VM spawn nonce so counterfactual
+    // addresses are predictable via octra_computeContractAddress(bytecode, factory, count).
+    spawn_count: int
+    // [V11] Reentrancy guard for create()/launch() (separate from `locked` used by vote_token)
+    busy: bool
   }
 
   event PoolCreated(token_a: address, token_b: address, pool: address, pool_id: int)
+  // [V11] Factory-first deployment events
+  event PoolDeployed(token_a: address, token_b: address, pool: address)
+  event TokenDeployed(token: address)
+  event TemplateSet(kind: string)
   // [SECURITY] H-4: PoolRemoved event for indexer awareness on update_pool
   event PoolRemoved(token_a: address, token_b: address, old_pool: address, new_pool: address)
   event TrustedTokenAdded(token: address)
@@ -64,6 +79,208 @@ contract SwapFactory {
     // [SECURITY] MEDIUM-8: Initialize reentrancy guard
     self.locked = false
   }
+
+  // ================= [V11] Factory-First Deployment =================
+
+  // [V11] Admin-set bytecode templates (base64 from octra_compileAml). The
+  // factory only spawns whitelisted code — create()/launch() take no bytecode.
+  fn set_pool_template(code: string): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    require(code != "", "empty bytecode")
+    self.pool_template = code
+    emit TemplateSet("pool")
+    return true
+  }
+
+  fn set_token_template(code: string): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    require(code != "", "empty bytecode")
+    self.token_template = code
+    emit TemplateSet("token")
+    return true
+  }
+
+  // [V11] Reference token used as token_b in launch() pools.
+  fn set_woct_token(addr: address): bool {
+    require(caller == self.fee_to_setter, "not authorized")
+    assert_address(addr)
+    require(addr != "", "zero address")
+    self.woct_token = addr
+    return true
+  }
+
+  view fn get_spawn_count(): int {
+    return self.spawn_count
+  }
+
+  view fn get_pool_template(): string {
+    return self.pool_template
+  }
+
+  view fn get_token_template(): string {
+    return self.token_template
+  }
+
+  view fn get_woct_token(): address {
+    return self.woct_token
+  }
+
+  // [V11] Internal registration — same invariants as register_pool, called
+  // after the factory itself spawned and configured the pool.
+  fn _register_new_pool(token_a: address, token_b: address, pool: address): bool {
+    // [V11-AUDIT] Confirm the spawned pool actually holds this token pair —
+    // mirrors the public register_pool() H-3 fix so the same invariant holds
+    // even when the factory itself registers a pool it just spawned.
+    require(call(pool, "get_token_a", []) == token_a, "pool token_a mismatch")
+    require(call(pool, "get_token_b", []) == token_b, "pool token_b mismatch")
+    require(self.pools_by_pair[token_a][token_b] == "" || self.pools_by_pair[token_a][token_b] == "0", "pool already exists for this pair")
+    require(self.pools_by_pair[token_b][token_a] == "" || self.pools_by_pair[token_b][token_a] == "0", "pool already exists for this pair")
+    self.pools_by_pair[token_a][token_b] = pool
+    self.pools_by_pair[token_b][token_a] = pool
+    self.pool_token_pair[pool] = token_a
+    self.pool_token_b_map[pool] = token_b
+    self.pools.push(pool)
+    let pool_id = self.pool_count
+    self.pool_count = pool_id + 1
+    emit PoolCreated(token_a, token_b, pool, pool_id)
+    return true
+  }
+
+  // [V11] Atomic pool creation: spawn SwapPool, configure it, pull the user's
+  // liquidity (user must pre-approve the factory via token.grant(factory, amt)),
+  // mint the initial LP position to the caller, register the pair and propose
+  // pool ownership to the caller (accepted via pool.accept_ownership()).
+  fn create(token_a: address, token_b: address, fee_num: int, fee_den: int, max_ratio: int, liq_a: int, liq_b: int, min_lp: int, deadline: int, lock_duration: int): address {
+    require(!self.paused, "factory paused")
+    require(!self.busy, "reentrancy")
+    require(self.pool_template != "", "pool template not set")
+    require(token_a != token_b, "identical tokens")
+    assert_address(token_a)
+    assert_address(token_b)
+    require(liq_a > 0 && liq_b > 0, "liquidity amounts must be positive")
+    require(lock_duration >= 0 && lock_duration <= 525600, "invalid lock duration")
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+
+    self.busy = true
+
+    // Spawn + configure the pool (failures revert the whole tx). SwapPool
+    // takes no constructor args, so deploy() is called with no args — passing
+    // a `[]` literal would emit a one-element netstring the VM ignores anyway.
+    let pool_addr = deploy(self.pool_template)
+    self.spawn_count += 1
+    require(call(pool_addr, "set_tokens", [token_a, token_b]), "set_tokens failed")
+    require(call(pool_addr, "set_factory", [self_addr]), "set_factory failed")
+    require(call(pool_addr, "set_fee_params", [fee_num, fee_den]), "set_fee_params failed")
+    if max_ratio > 0 {
+      require(call(pool_addr, "set_max_initial_price_ratio", [max_ratio]), "set_max_initial_price_ratio failed")
+    }
+
+    // Pull user liquidity into the factory, then pool pulls directly from factory
+    // (add_liquidity_for pulls from caller, which is the factory in this case)
+    require(call(token_a, "pull", [caller, self_addr, liq_a]), "token_a pull failed")
+    require(call(token_b, "pull", [caller, self_addr, liq_b]), "token_b pull failed")
+
+    // Initial position is minted directly to the caller
+    call(pool_addr, "add_liquidity_for", [caller, liq_a, liq_b, min_lp, deadline, lock_duration])
+
+    require(_register_new_pool(token_a, token_b, pool_addr), "register failed")
+    emit PoolDeployed(token_a, token_b, pool_addr)
+
+    // Two-step ownership transfer; caller completes with pool.accept_ownership()
+    require(call(pool_addr, "transfer_ownership", [caller]), "transfer_ownership failed")
+
+    self.busy = false
+    return pool_addr
+  }
+
+  // [V11] Atomic token launch + pool creation. The factory spawns the token
+  // (initial_owner = caller, supply_recipient = the factory so launch liquidity
+  // is self-funded — no pre-approval needed on the new token), spawns the pool,
+  // funds both sides, mints the LP position to the caller, transfers the
+  // remaining supply to the caller and proposes pool ownership to the caller.
+  // Note: tax and auto_burn must be disabled for factory-launched tokens (the
+  // factory cannot set tax_exempt on a token it does not own).
+  fn launch(n: string, s: string, contract_name: string, initial_supply: int, dec: int, initial_owner: address, supply_recipient: address, max_tx_amount: int, max_wallet_amount: int, cooldown_blocks: int, tax_bps: int, tax_recipient: address, auto_burn_bps: int, mintable: bool, burnable: bool, pausable: bool, blacklist: bool, max_tx: bool, max_wallet: bool, cooldown: bool, tax: bool, auto_burn: bool, trusted_1: address, trusted_2: address, trusted_3: address, trusted_4: address, trusted_5: address, fee_num: int, fee_den: int, max_ratio: int, liq_token: int, liq_woct: int, min_lp: int, deadline: int, lock_duration: int): (address, address) {
+    require(!self.paused, "factory paused")
+    require(!self.busy, "reentrancy")
+    require(self.token_template != "" && self.pool_template != "", "templates not set")
+    require(self.woct_token != "" && self.woct_token != "0", "woct token not set")
+    require(liq_token > 0 && liq_woct > 0, "liquidity amounts must be positive")
+    require(initial_supply >= liq_token, "liquidity exceeds supply")
+    require(lock_duration >= 0 && lock_duration <= 525600, "invalid lock duration")
+    require(deadline > epoch && deadline <= epoch + 300, "deadline must be 1-300 seconds from now")
+    // [V11] The factory cannot exempt the pool from token tax/auto-burn on a
+    // token it does not own — exact liquidity math requires both off.
+    require(tax == false, "tax not supported on factory launch")
+    require(auto_burn == false, "auto_burn not supported on factory launch")
+    // [V11] Tax/auto_burn must be fully off (constructor requires the bps to
+    // also be 0 so the flags can never be turned on afterwards).
+    require(tax_bps == 0, "tax_bps must be 0 on factory launch")
+    require(auto_burn_bps == 0, "auto_burn_bps must be 0 on factory launch")
+    if max_tx {
+      require(max_tx_amount >= liq_token, "max_tx lower than liquidity")
+    }
+
+    self.busy = true
+
+    // [V11] The factory deploys the token itself: initial_owner is forced to
+    // the caller (one less footgun) and supply_recipient is forced to the
+    // factory so it funds the pool's token side without a separate grant.
+    // The SPAWN2 call below reads contiguous param registers 0..26 — the
+    // reassignments below MOV into reg 5 (initial_owner) and reg 6
+    // (supply_recipient) in place, preserving contiguity.
+    initial_owner = caller
+    supply_recipient = self_addr
+
+    // Spawn the token. NOTE: deploy() takes constructor args as VARIADIC params
+    // (not [arr]) so SPAWN2 reads them straight from contiguous param registers
+    // 0..26 — packing them into a netstring literal would overflow the 63-reg
+    // local budget. Token params are in ordinate positions 0..26 = contiguous.
+    let token_addr = deploy(self.token_template, n, s, contract_name, initial_supply, dec, initial_owner, supply_recipient, max_tx_amount, max_wallet_amount, cooldown_blocks, tax_bps, tax_recipient, auto_burn_bps, mintable, burnable, pausable, blacklist, max_tx, max_wallet, cooldown, tax, auto_burn, trusted_1, trusted_2, trusted_3, trusted_4, trusted_5)
+    self.spawn_count += 1
+    // The factory must hold the launch supply so it can fund the pool itself
+    require(call(token_addr, "get_supply_recipient", []) == self_addr, "supply_recipient must be the factory")
+    // [V11] Defense-in-depth: the pool spawns with set_tokens(token, woct) so
+    // the two sides must be distinct. The factory's spawn counter guarantees
+    // a different address, but asserting it explicitly keeps the invariant
+    // visible at the call site.
+    require(token_addr != self.woct_token, "token cannot equal woct")
+
+    // Spawn + configure the pool (SwapPool takes no constructor args)
+    let pool_addr = deploy(self.pool_template)
+    self.spawn_count += 1
+    require(call(pool_addr, "set_tokens", [token_addr, self.woct_token]), "set_tokens failed")
+    require(call(pool_addr, "set_factory", [self_addr]), "set_factory failed")
+    require(call(pool_addr, "set_fee_params", [fee_num, fee_den]), "set_fee_params failed")
+    if max_ratio > 0 {
+      require(call(pool_addr, "set_max_initial_price_ratio", [max_ratio]), "set_max_initial_price_ratio failed")
+    }
+
+    // Fund the pool: token side from factory's own supply (supply_recipient = factory),
+    // WOCT side pulled from caller. add_liquidity_for pulls from caller (factory).
+    require(call(self.woct_token, "pull", [caller, self_addr, liq_woct]), "woct pull failed")
+
+    // Initial position is minted directly to the caller
+    call(pool_addr, "add_liquidity_for", [caller, liq_token, liq_woct, min_lp, deadline, lock_duration])
+
+    require(_register_new_pool(token_addr, self.woct_token, pool_addr), "register failed")
+    emit PoolDeployed(token_addr, self.woct_token, pool_addr)
+    emit TokenDeployed(token_addr)
+
+    // Send the remaining supply to the caller
+    let leftover = initial_supply - liq_token
+    if leftover > 0 {
+      require(call(token_addr, "transfer", [caller, leftover]), "leftover transfer failed")
+    }
+
+    // Two-step ownership transfer; caller completes with pool.accept_ownership()
+    require(call(pool_addr, "transfer_ownership", [caller]), "transfer_ownership failed")
+
+    self.busy = false
+    return (token_addr, pool_addr)
+  }
+
+  // ================= [END V11] =================
 
   fn set_paused(status: bool): bool {
     require(caller == self.fee_to_setter, "not authorized")
@@ -303,8 +520,10 @@ contract SwapFactory {
     }
 
     // Remove from pools list using swap-pop (O(1) removal)
+    // [V11-FIX] AML has no `break` — use a found-flag loop instead.
     let i = 0
-    while i < len(self.pools) {
+    let found_pool = false
+    while i < len(self.pools) && !found_pool {
       if self.pools[i] == pool {
         let last_idx = len(self.pools) - 1
         if i != last_idx {
@@ -313,14 +532,15 @@ contract SwapFactory {
         }
         self.pools.pop()
         self.pool_count = self.pool_count - 1
-        break
+        found_pool = true
       }
       i += 1
     }
 
     // Remove from reward_pools list if present
     let j = 0
-    while j < len(self.reward_pools) {
+    let found_reward = false
+    while j < len(self.reward_pools) && !found_reward {
       if self.reward_pools[j] == pool {
         let last_idx_r = len(self.reward_pools) - 1
         if j != last_idx_r {
@@ -328,7 +548,7 @@ contract SwapFactory {
           self.reward_pools[j] = last_rpool
         }
         self.reward_pools.pop()
-        break
+        found_reward = true
       }
       j += 1
     }
