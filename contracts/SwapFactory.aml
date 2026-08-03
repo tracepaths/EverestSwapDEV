@@ -491,20 +491,24 @@ contract SwapFactory {
     let token_b = self.pool_token_b_map[pool]
 
     // Auth: caller must be pool owner (creator) OR the factory fee_to_setter
-    let pool_owner = call(pool, "owner", [])
+    // [V12-FIX] Was call(pool, "owner", []) — `owner` is a bare storage field on
+    // SwapPool, not a callable function, so this reverted with "method not found"
+    // on EVERY invocation, making remove_pool() permanently unusable. SwapPool
+    // now exposes view fn get_owner().
+    let pool_owner = call(pool, "get_owner", [])
     let is_authorized = (caller == pool_owner || caller == self.fee_to_setter)
     require(is_authorized, "not pool owner or admin")
 
-    // Safety: pool must be fully drained (no reserves)
-    // This prevents a creator from removing a pool that still has LP funds
-    let reserve_a = call(pool, "reserve_a", [])
-    let reserve_b = call(pool, "reserve_b", [])
-    require(reserve_a == 0 || reserve_a == "0", "pool still has token_a reserves")
-    require(reserve_b == 0 || reserve_b == "0", "pool still has token_b reserves")
-
-    // Safety: no active LP positions
-    let total_lp = call(pool, "total_lp", [])
-    require(total_lp == 0 || total_lp == "0", "pool still has active LP positions")
+    // Safety: pool must be drained of all USER liquidity.
+    // [V12-FIX] The gate used to require reserve_a/reserve_b/total_lp == 0, but
+    // that is UNREACHABLE for any pool that was ever seeded: SwapPool burns
+    // `minimum_liquidity` (1000) into total_lp permanently (Uniswap-V2 style),
+    // and the matching dust reserves back it, so reserves + total_lp never
+    // return to 0. The correct "no user funds left" signal is total_liquidity
+    // (LP excluding the burned minimum), which DOES reach 0 once every user
+    // position is withdrawn. This is what actually protects LPs from a rug.
+    let total_liquidity = call(pool, "get_total_liquidity", [])
+    require(total_liquidity == 0 || total_liquidity == "0", "pool still has active LP positions")
 
     // Remove from pools_by_pair map (both directions)
     self.pools_by_pair[token_a][token_b] = ""

@@ -1004,6 +1004,50 @@ contract SwapPool {
     return self.pending_owner
   }
 
+  // [V12] Scalar getters required by SwapFactory.remove_pool().
+  // Previously remove_pool() called `owner`, `reserve_a`, `reserve_b` and
+  // `total_lp` directly — but those are bare storage fields, NOT callable
+  // functions, so every remove_pool() reverted at the first call() with
+  // "method not found". The feature never worked for anyone.
+  //   These are deliberately SCALAR (not tuples): no call() site anywhere in
+  // this codebase consumes a tuple-returning function, and AML has no
+  // destructuring syntax (`let (a, b) = ...`), so get_reserves() cannot be used
+  // from remove_pool(). Naming follows the get_* convention already used by
+  // Token.aml's get_owner().
+  view fn get_owner(): address {
+    return self.owner
+  }
+
+  view fn is_active(): bool {
+    return self.active
+  }
+
+  view fn get_reserve_a(): int {
+    return self.reserve_a
+  }
+
+  view fn get_reserve_b(): int {
+    return self.reserve_b
+  }
+
+  view fn get_fee_numerator(): int {
+    return self.fee_numerator
+  }
+
+  view fn get_fee_denominator(): int {
+    return self.fee_denominator
+  }
+
+  // [V12] User-owned LP supply, EXCLUDING the minimum_liquidity that is burned
+  // to the dead address on the first add_liquidity (Uniswap-V2 style). This is
+  // the correct "is the pool drained of user funds?" signal for remove_pool():
+  // total_lp can NEVER return to 0 once seeded (it keeps the burned minimum,
+  // plus dust reserves back it), but total_liquidity DOES reach 0 once every
+  // user position is withdrawn.
+  view fn get_total_liquidity(): int {
+    return self.total_liquidity
+  }
+
   // [V7] Position-based view functions
   view fn get_position(id: int): (address, int, int) {
     return (self.position_owners[id], self.position_liquidities[id], self.position_unlock_times[id])

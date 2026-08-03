@@ -231,6 +231,14 @@ contract Router {
     let balance_after = call(token_in, "balance_of", [self_addr])
     require(balance_after >= balance_before + amount_in, "token pull did not increase router balance (possible malicious token)")
 
+    // [AUDIT-FIX MED-2] Grant the pool an allowance to pull token_in from the
+    // router. The pool's swap_*_for_* does `token.pull(caller=router, pool, amount)`,
+    // which requires grants[router][pool] >= amount_in. The multi-hop paths already
+    // grant before each hop; single-hop omitted it, so every single-hop swap routed
+    // through the Router reverted with "not allowed". Grant exactly amount_in — the
+    // pool decrements the allowance back to 0 on pull, leaving no residual approval.
+    require(call(token_in, "grant", [pool_addr, amount_in]), "token grant failed")
+
     // Pool's swap pulls from caller (Router). Router has tokens from step 1.
     // Pool sends output to caller (Router). Router forwards to recipient.
     let amount_out = 0

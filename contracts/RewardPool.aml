@@ -392,6 +392,13 @@ contract RewardPool {
     let unlock_time = self.position_unlock_times[position_id]
     require(lp_amount > 0, "position not found")
     require(epoch >= unlock_time, "liquidity is locked")
+    // [AUDIT-FIX MED-1] Enforce the advertised creator LP lock. get_reward_info
+    // exposes creator_lock_end as an anti-rugpull guarantee, but it was never
+    // enforced — the creator could seed with lock_duration=0 and exit immediately.
+    // Bind the creator to that lock regardless of the per-position unlock time.
+    if caller == self.creator {
+      require(epoch >= self.creator_lock_end, "creator LP is locked")
+    }
 
     self.locked = true
 
@@ -496,6 +503,10 @@ contract RewardPool {
       pos_id = self.user_position_next[pos_id]
     }
     require(found, "no unlocked positions")
+    // [AUDIT-FIX MED-1] Enforce the advertised creator LP lock (see remove_liquidity).
+    if caller == self.creator {
+      require(epoch >= self.creator_lock_end, "creator LP is locked")
+    }
 
     let lp_bal = self.position_liquidities[position_id]
 
@@ -889,6 +900,14 @@ contract RewardPool {
       tracked = self.reserve_a + self.fee_reserve_a
     } else if token == self.token_b {
       tracked = self.reserve_b + self.fee_reserve_b
+    }
+    // [AUDIT-FIX HIGH-1] The reward token balance backing reward_remaining is NOT
+    // rescueable — it belongs to LPs who have not yet claimed. Without this guard,
+    // the owner could drain all undistributed rewards instantly, bypassing both the
+    // emergency_available_after cooldown and the creator-only emergency_withdraw.
+    // Only genuine surplus (donations/dust above reward_remaining) can be rescued.
+    if token == self.reward_token {
+      tracked += self.reward_remaining
     }
     let actual_bal = call(token, "balance_of", [self_addr])
     require(actual_bal > tracked, "no excess tokens to rescue")
