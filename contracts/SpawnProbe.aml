@@ -1,0 +1,30 @@
+// Minimal probe: does deploy() from inside a call() work on this node at all?
+contract SpawnProbe {
+  state {
+    tmpl: string
+    last: address
+    count: int
+  }
+
+  constructor() {
+    self.tmpl = ""
+    self.last = ""
+    self.count = 0
+  }
+
+  fn set_tmpl(code: string): bool {
+    self.tmpl = code
+    return true
+  }
+
+  fn do_spawn(): address {
+    require(self.tmpl != "", "no tmpl")
+    let a = deploy(self.tmpl)
+    self.count += 1
+    self.last = a
+    return a
+  }
+
+  view fn get_last(): address { return self.last }
+  view fn get_count(): int { return self.count }
+}

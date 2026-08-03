@@ -180,6 +180,14 @@ contract SwapFactory {
     require(call(token_a, "pull", [caller, self_addr, liq_a]), "token_a pull failed")
     require(call(token_b, "pull", [caller, self_addr, liq_b]), "token_b pull failed")
 
+    // [V12-FIX] add_liquidity_for makes the pool pull tokens from THIS factory
+    // (the caller in that inner call). The factory must therefore approve the
+    // pool to pull both tokens first — without these grants the inner pull()
+    // reverts with "token_a pull failed", which silently killed every create()
+    // (no receipt, nonce not consumed). Mirror the same fix in launch().
+    require(call(token_a, "grant", [pool_addr, liq_a]), "token_a grant to pool failed")
+    require(call(token_b, "grant", [pool_addr, liq_b]), "token_b grant to pool failed")
+
     // Initial position is minted directly to the caller
     call(pool_addr, "add_liquidity_for", [caller, liq_a, liq_b, min_lp, deadline, lock_duration])
 
@@ -259,6 +267,13 @@ contract SwapFactory {
     // Fund the pool: token side from factory's own supply (supply_recipient = factory),
     // WOCT side pulled from caller. add_liquidity_for pulls from caller (factory).
     require(call(self.woct_token, "pull", [caller, self_addr, liq_woct]), "woct pull failed")
+
+    // [V12-FIX] Same missing-approval bug as create(): add_liquidity_for makes
+    // the pool pull BOTH sides from this factory, so the factory must grant the
+    // pool an allowance on the freshly minted token and on WOCT first. Without
+    // these the inner pull() reverted and launch() died with no receipt.
+    require(call(token_addr, "grant", [pool_addr, liq_token]), "token grant to pool failed")
+    require(call(self.woct_token, "grant", [pool_addr, liq_woct]), "woct grant to pool failed")
 
     // Initial position is minted directly to the caller
     call(pool_addr, "add_liquidity_for", [caller, liq_token, liq_woct, min_lp, deadline, lock_duration])
