@@ -14,14 +14,40 @@ everestswapdev/
 - **Frontend**: `tracepaths/EverestSwap` (React + Vite app)
 - **Backend**: `tracepaths/EverestSwapDEV` (this repo — contracts, scripts, deployment)
 
-## Contract Addresses (V9 — Devnet, Redeployed 2026-07-25)
+## Contract Addresses (V12.1 — Devnet, Redeployed 2026-08-04)
 
 - OES: `octGURUy7hQhXHVcP9bovbJnpoXqCv2gpWBrk6fqtXqJ2sC` (redeployed 2026-07-25, owner: oct2mhQQYM3MmDwMxbcpvTCMgSVPxh47YUdZGn3aR1r13PK)
 - WOCT: `oct4g33tzC2cJncL5RFr9TRiyk8yCNP1h2xaogiWJS5opNv`
-- SwapPool: `oct2ws6ug4Va8R8ctPvE76zyc8fgBJDTC4BgG4WjJXCBo8R`
-- SwapFactory: `octJbkjXrAqvZdg2JZVZTyQqpYB52HYkBPDmGMmEQBMgSFE`
-- Router: `octEtQJQDFC85tXtGpERHX69rNoo1GJA7EVUaLezANQxC8K`
+- SwapPool (template): `oct9SgrzmX3tyaRMoTHEfEVJLLdhsQ2kSo7ba7iFUq2S1Rh`
+- SwapFactory: `octCSV1rFyXj3wWRvLuDZRTNNtnkv24v5FQ34xuAywVKqXu`
+- Router: `octEtQJQDFC85tXtGpERHX69rNoo1GJA7EVUaLezANQxC8K` (still points at the OLD factory — repointing needs propose_factory + 24h timelock)
 - RewardPool: `octCfD5XbQwiPUH1CYcQZPJuSuNEbPTtix7LfJAepeGzSr3`
+
+### V12 changes (why this redeploy exists)
+
+- **SwapPool**: added scalar getters `get_owner`, `is_active`, `get_reserve_a`,
+  `get_reserve_b`, `get_fee_numerator`, `get_fee_denominator`,
+  `get_total_liquidity`. `remove_pool` used to call `owner`/`reserve_a`/
+  `reserve_b`/`total_lp` which are bare STORAGE FIELDS, not callable functions —
+  every call reverted with "method not found", so pool removal never worked.
+- **SwapFactory `remove_pool`**: now gates on `get_total_liquidity() == 0`
+  instead of `reserves == 0 && total_lp == 0`. The old gate was unreachable:
+  `minimum_liquidity` (1000) is burned permanently on the first add_liquidity, so
+  `total_lp` and the backing dust reserves never return to 0.
+- **SwapFactory `create()` / `launch()`**: added the missing
+  `token.grant(pool, amount)` calls before `add_liquidity_for`. Both functions
+  pull the user's tokens into the FACTORY, then have the POOL pull from the
+  factory — without the grant the inner `pull()` reverted ("token_a pull
+  failed"), which silently killed every create/launch.
+
+### Devnet node behaviour worth remembering
+
+- A **reverted call leaves NO receipt and does NOT consume the nonce**. A failing
+  tx therefore looks exactly like one the node dropped. Don't assume "dropped".
+- The node reports `ou_cost` as the base call fee (1000) but still executes
+  high-effort txs (create measured at effort 27174). `ou` is not the blocker.
+- `deploy()` from inside a call (SPAWN) works fine — verified with
+  `contracts/SpawnProbe.aml` (effort 10621–12580, state committed).
 
 ## CAT Token (Deployed 2026-07-27)
 
