@@ -46,18 +46,40 @@ async function receipt(h, max = 120) {
 const NONCE = { v: 0 };
 async function seedNonce(a) { NONCE.v = (await rpc('octra_balance', [a])).nonce; }
 async function fee(t) { try { const f = await rpc('octra_recommendedFee', [t]); return String(f.recommended || f.minimum || '2000'); } catch { return '2000'; } }
-async function send(from, to_, amount, method, params, sk, label, ouOverride, maxWait = 120) {
-  NONCE.v += 1;
-  const n = NONCE.v;
+// [FIX] Retry with a FRESH nonce re-seed on transient failures. Two distinct
+// things go wrong on this devnet and both look the same from the outside:
+//   - octra_submit intermittently answers "malformed transaction" / "invalid
+//     nonce" even for a well-formed tx,
+//   - a tx is accepted but never lands (no receipt) because it reverted, and a
+//     revert here consumes no nonce — so the local counter drifts ahead.
+// Re-seeding from the chain before each retry fixes the drift; without it every
+// subsequent tx in the run collides and the whole script stalls.
+async function send(from, to_, amount, method, params, sk, label, ouOverride, maxWait = 120, attempts = 3) {
   const ou = ouOverride || await fee('call');
-  let ts = Date.now() / 1000; if (ts % 1 === 0) ts += 1e-6;
-  const tx = { from, to_, amount, nonce: n, ou, timestamp: ts, op_type: 'call', encrypted_data: method, message: JSON.stringify(params) };
-  sign(tx, sk);
-  const r = await rpc('octra_submit', [tx]);
-  const rc = await receipt(r.tx_hash, maxWait);
-  console.log(`  ${rc.success ? 'OK' : 'FAIL'} ${label} (${r.tx_hash.slice(0,12)}… effort ${rc.effort}, ou ${ou})`);
-  if (!rc.success) throw new Error(`${label} failed: ${rc.error}`);
-  return rc;
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (attempt > 1) {
+      await new Promise(r => setTimeout(r, 3000));
+      await seedNonce(from);
+      console.log(`    retry ${attempt}/${attempts} for ${label} (nonce re-seeded to ${NONCE.v})`);
+    }
+    NONCE.v += 1;
+    const n = NONCE.v;
+    let ts = Date.now() / 1000; if (ts % 1 === 0) ts += 1e-6;
+    const tx = { from, to_, amount, nonce: n, ou, timestamp: ts, op_type: 'call', encrypted_data: method, message: JSON.stringify(params) };
+    sign(tx, sk);
+    try {
+      const r = await rpc('octra_submit', [tx]);
+      const rc = await receipt(r.tx_hash, maxWait);
+      console.log(`  ${rc.success ? 'OK' : 'FAIL'} ${label} (${r.tx_hash.slice(0,12)}… effort ${rc.effort}, ou ${ou})`);
+      if (!rc.success) throw new Error(`${label} failed: ${rc.error}`);
+      return rc;
+    } catch (e) {
+      lastErr = e;
+      console.log(`    attempt ${attempt} failed: ${e.message.slice(0, 90)}`);
+    }
+  }
+  throw lastErr;
 }
 async function view(addr, method, params = []) { return rpc('contract_call', [addr, method, params]); }
 function scalar(r) { return r && typeof r === 'object' ? (r.result ?? null) : r; }
@@ -112,9 +134,12 @@ async function main() {
   // never landed (execution effort exceeded ou -> dropped, no receipt). Give it
   // a deploy-2x-sized ceiling.
   await send(me, FACTORY, '0', 'launch', params, sk, 'launch', '3000000', 240);
-  const plen = Number(scalar(await view(FACTORY, 'pools_length')));
-  let pool = scalar(await view(FACTORY, 'get_pool_at', [plen - 1]));
-  if (!pool) { const ap = await view(FACTORY, 'all_pools'); const st = ap && ap.storage ? ap.storage : {}; pool = st[`pools:${plen-1}`] || null; }
+  // NOTE: there is no get_pool_at() on SwapFactory — resolve the new pool from
+  // the storage map that every contract_call returns (pools:<index>).
+  const ap = await view(FACTORY, 'all_pools');
+  const st = ap && ap.storage ? ap.storage : {};
+  const plen = Number(st.pools_len ?? scalar(await view(FACTORY, 'pools_length')) ?? 0);
+  const pool = st[`pools:${plen - 1}`] || null;
   console.log(`  pools_length=${plen}  new pool=${pool}`);
   if (!pool) throw new Error('could not resolve new pool address');
 

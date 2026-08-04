@@ -44,6 +44,13 @@ everestswapdev/
 
 - A **reverted call leaves NO receipt and does NOT consume the nonce**. A failing
   tx therefore looks exactly like one the node dropped. Don't assume "dropped".
+- Because a revert consumes no nonce, resubmitting with a nonce re-read from
+  `octra_balance` reuses the SAME nonce and the node rejects it with
+  `malformed transaction / duplicate nonce (fee rate bump < 10%)`. Retries must
+  raise `ou` by >=10% (the scripts here bump 25%) or they will loop forever.
+  This was the cause of every "transient" failure seen while verifying V12.
+- Receipt polling can outrun indexing: a call may report NO RECEIPT and still
+  have succeeded. Confirm against contract state before concluding it failed.
 - The node reports `ou_cost` as the base call fee (1000) but still executes
   high-effort txs (create measured at effort 27174). `ou` is not the blocker.
 - `deploy()` from inside a call (SPAWN) works fine — verified with

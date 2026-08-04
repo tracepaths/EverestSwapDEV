@@ -9,13 +9,43 @@ function canon(t){let s=`{"from":"${esc(t.from)}","to_":"${esc(t.to_)}","amount"
 function sign(t,sk){t.signature=Buffer.from(nacl.sign.detached(Buffer.from(canon(t),'utf-8'),sk)).toString('base64');t.public_key=Buffer.from(sk.slice(32,64)).toString('base64');}
 function A(mn){const s=crypto.pbkdf2Sync(mn,'mnemonic',2048,64,'sha512');const h=crypto.createHmac('sha512','Octra seed');h.update(Buffer.from(s));const kp=nacl.sign.keyPair.fromSeed(new Uint8Array(h.digest().slice(0,32)));const sha=crypto.createHash('sha256').update(Buffer.from(kp.publicKey)).digest();let b=bs58.default.encode(sha);while(b.length<44)b='1'+b;return{kp,address:'oct'+b};}
 async function rec(h,max=50){for(let i=0;i<max;i++){await new Promise(x=>setTimeout(x,3000));try{const rc=await rpc('contract_receipt',[h]);if(rc.result&&rc.result.success!==undefined)return rc.result;}catch{}}return null;}
-async function call(me,sk,to,m,params,ou){const n=(await rpc('octra_balance',[me])).result.nonce+1;let ts=Date.now()/1000;if(ts%1===0)ts+=1e-6;const tx={from:me,to_:to,amount:'0',nonce:n,ou:ou||'1000',timestamp:ts,op_type:'call',encrypted_data:m,message:JSON.stringify(params)};sign(tx,sk);const r=await rpc('octra_submit',[tx]);if(!r.result){console.log(`  ${m} submit err:`,r.error);return null;}const rc=await rec(r.result.tx_hash);console.log(`  ${m}: ${rc?('success='+rc.success+' err='+rc.error+' effort='+rc.effort):'NO RECEIPT'}`);return rc;}
+// [FIX] Retry with a bumped fee on 'duplicate nonce (fee rate bump < 10%)'.
+// A revert consumes NO nonce on this node, so re-reading octra_balance hands
+// back the same nonce and the node rejects the resend unless the fee rises >=10%.
+async function call(me,sk,to,m,params,ou){
+  let feeOu=parseInt(ou||'1000',10);
+  for(let attempt=1;attempt<=4;attempt++){
+    const n=(await rpc('octra_balance',[me])).result.nonce+1;
+    let ts=Date.now()/1000;if(ts%1===0)ts+=1e-6;
+    const tx={from:me,to_:to,amount:'0',nonce:n,ou:String(feeOu),timestamp:ts,op_type:'call',encrypted_data:m,message:JSON.stringify(params)};
+    sign(tx,sk);
+    const r=await rpc('octra_submit',[tx]);
+    if(!r.result){
+      const d=(r.error&&(r.error.data||r.error.message))||'';
+      console.log(`  ${m} submit err (attempt ${attempt}):`,d);
+      if(/duplicate nonce|fee rate bump/i.test(String(d))){feeOu=Math.ceil(feeOu*1.25);await new Promise(x=>setTimeout(x,2500));continue;}
+      return null;
+    }
+    const rc=await rec(r.result.tx_hash);
+    console.log(`  ${m}: ${rc?('success='+rc.success+' err='+rc.error+' effort='+rc.effort):'NO RECEIPT (may have reverted)'}`);
+    if(rc) return rc;
+    // no receipt -> likely revert; bump fee and retry once more
+    feeOu=Math.ceil(feeOu*1.25);
+    await new Promise(x=>setTimeout(x,2500));
+  }
+  return null;
+}
 async function v(a,m,p=[]){const r=await rpc('contract_call',[a,m,p]);return r.result&&(r.result.result??null);}
 (async()=>{
   const {kp,address:me}=A(process.env.MNEMONIC);const sk=kp.secretKey;
-  console.log('1) accept_ownership');
-  await call(me,sk,POOL,'accept_ownership',[]);
-  console.log('   owner now:',await v(POOL,'get_owner'),'(me='+me+')');
+  const curOwner=await v(POOL,'get_owner');
+  if(curOwner===me){
+    console.log('1) accept_ownership — SKIP (already owner)');
+  }else{
+    console.log('1) accept_ownership');
+    await call(me,sk,POOL,'accept_ownership',[]);
+    console.log('   owner now:',await v(POOL,'get_owner'),'(me='+me+')');
+  }
   console.log('2) remove_liquidity #1 (drain)');
   const ep=(await rpc('epoch_current',[])).result.epoch_id;
   await call(me,sk,POOL,'remove_liquidity',[1,0,0,ep+150]);
