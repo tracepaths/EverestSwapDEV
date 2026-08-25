@@ -20,6 +20,7 @@ contract EverestTokenLauncher {
     owner: address
     pending_owner: address
     token_template: string
+    token_template_bytes: int  // explicit: len() reads 1 on an unset string
     spawn_count: int
 
     tokens: list[address]
@@ -63,6 +64,7 @@ contract EverestTokenLauncher {
     require(caller == self.owner, "not owner")
     require(len(bytecode) > 0, "empty template")
     self.token_template = bytecode
+    self.token_template_bytes = len(bytecode)
     emit TemplateSet(len(bytecode))
     return true
   }
@@ -126,7 +128,7 @@ contract EverestTokenLauncher {
     burn_bps: int
   ): address {
     require(!self.paused, "launcher paused")
-    require(len(self.token_template) > 0, "token template not set")
+    require(self.token_template_bytes > 0, "token template not set")
     assert_address(supply_recipient)
     require(supply_recipient != "", "supply recipient is zero")
 
@@ -155,7 +157,7 @@ contract EverestTokenLauncher {
   view fn get_owner(): address { return self.owner }
   view fn get_pending_owner(): address { return self.pending_owner }
   view fn is_paused(): bool { return self.paused }
-  view fn get_template_size(): int { return len(self.token_template) }
+  view fn get_template_size(): int { return self.token_template_bytes }
   view fn get_spawn_count(): int { return self.spawn_count }
   view fn get_token_count(): int { return self.token_count }
   view fn get_token_at(i: int): address { return self.tokens[i] }

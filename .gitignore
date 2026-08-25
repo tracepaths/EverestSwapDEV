@@ -7,3 +7,9 @@ dist/
 indexer/data/
 
 .github-config
+
+# Local per-account test credentials (never commit)
+.env.*
+
+# Throwaway test-stack deployment records
+deployments-test-*.json

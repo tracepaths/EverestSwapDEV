@@ -1,23 +1,25 @@
 // Deploy + call helpers built on octra-tx.mjs. Written once so the
 // concentrated-liquidity tooling does not re-derive the tx envelope in every
 // script the way the older `.js` deploy scripts do.
-import { getDeployer, signTx, rpcCall, waitReceipt } from './octra-tx.mjs';
+import {
+  getDeployer, signTx, rpcCall, rpcCallRetry, waitReceipt, isTransientRpcError,
+} from './octra-tx.mjs';
 
 export const FEE_DEPLOY = '200000';
 export const FEE_CALL = '1000';
 
 export async function nonceOf(address) {
-  const bal = await rpcCall('octra_balance', [address]);
+  const bal = await rpcCallRetry('octra_balance', [address]);
   return Number(bal?.nonce ?? 0);
 }
 
 export async function balanceOf(address) {
-  const bal = await rpcCall('octra_balance', [address]);
+  const bal = await rpcCallRetry('octra_balance', [address]);
   return { balance: bal?.balance, nonce: Number(bal?.nonce ?? 0) };
 }
 
 export async function currentEpoch() {
-  const e = await rpcCall('epoch_current', []);
+  const e = await rpcCallRetry('epoch_current', []);
   return Number(e?.epoch_id ?? e?.epoch ?? e);
 }
 
@@ -36,7 +38,7 @@ async function submit(tx, secretKey, label, opts = {}) {
 }
 
 export async function deployContract({ bytecode, signer, nonce, ou = FEE_DEPLOY, label = 'deploy', maxWaitMs }) {
-  const addr = await rpcCall('octra_computeContractAddress', [bytecode, signer.address, nonce]);
+  const addr = await rpcCallRetry('octra_computeContractAddress', [bytecode, signer.address, nonce]);
   const address = addr?.contract_address ?? addr?.address ?? addr;
   const tx = {
     from: signer.address, to_: address, amount: '0', nonce, ou,
@@ -98,12 +100,6 @@ async function viewOnce(contract, method, params, caller) {
   ], 60_000);
 }
 
-// `view busy` is the node refusing a concurrent view on a contract that is
-// already executing one — backpressure, not a program error, so it retries.
-function isTransient(msg) {
-  return /Unexpected token|not valid JSON|non-JSON|429|rate|ECONNRESET|timed out|fetch failed|502|503|504|view busy|busy/i.test(msg || '');
-}
-
 export async function viewCall(contract, method, params = [], caller) {
   await acquire();
   try {
@@ -115,7 +111,7 @@ export async function viewCall(contract, method, params = [], caller) {
       try {
         return await viewOnce(contract, method, params, caller);
       } catch (e) {
-        if (attempt === 6 || !isTransient(e.message)) throw e;
+        if (attempt === 6 || !isTransientRpcError(e.message)) throw e;
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay * 2, 8000);
       }

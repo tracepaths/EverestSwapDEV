@@ -5,7 +5,7 @@
 // Everything is written to deployments-cl.json as it happens, so a run that dies
 // halfway can be resumed by re-running with the surviving addresses in place
 // rather than starting over and orphaning what already landed.
-import './lib/env.mjs';
+import { deploymentsPath } from './lib/env.mjs';
 import fs from 'node:fs';
 import { compileFile } from './lib/aml.mjs';
 import { labelReport } from './lib/jdest.mjs';
@@ -13,7 +13,7 @@ import {
   signerFromEnv, nonceOf, balanceOf, deployContract, callContract, viewValue, currentEpoch,
 } from './lib/octra-chain.mjs';
 
-const OUT = 'deployments-cl.json';
+const OUT = deploymentsPath();
 const state = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf-8')) : {};
 const save = () => fs.writeFileSync(OUT, JSON.stringify(state, null, 2) + '\n');
 

@@ -11,3 +11,14 @@ try {
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
   }
 } catch { /* no .env — rely on the ambient environment */ }
+
+// Which deployment record the tooling reads and writes.
+//
+// Defaults to the canonical file. Pointing DEPLOYMENTS_FILE at another one lets a
+// throwaway stack be deployed and exercised end to end without touching the
+// addresses the interface and the indexer are configured against — the scripts
+// rewrite this file as they go, so sharing it between a real deployment and a
+// test run would silently repoint the interface at test contracts.
+export function deploymentsPath() {
+  return path.resolve(root, process.env.DEPLOYMENTS_FILE || 'deployments-cl.json');
+}

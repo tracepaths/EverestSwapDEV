@@ -5,10 +5,8 @@
 // page rather than JSON-RPC, so every call here retries on transient failures.
 // Without this a probe run reports a wall of bogus "FAIL"s that look like
 // language limitations but are just backpressure.
-import { rpcCall } from './octra-tx.mjs';
+import { rpcCall, isTransientRpcError } from './octra-tx.mjs';
 import fs from 'node:fs';
-
-const TRANSIENT = /non-JSON|not valid JSON|Unexpected token|\b(429|502|503|504)\b|rate|ECONNRESET|timed out|fetch failed/i;
 
 async function withRetry(fn, attempts = 7) {
   let delay = 600;
@@ -16,7 +14,7 @@ async function withRetry(fn, attempts = 7) {
     try {
       return await fn();
     } catch (e) {
-      if (i >= attempts - 1 || !TRANSIENT.test(e.message || '')) throw e;
+      if (i >= attempts - 1 || !isTransientRpcError(e.message)) throw e;
       await new Promise((r) => setTimeout(r, delay));
       delay = Math.min(delay * 2, 8000);
     }

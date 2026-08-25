@@ -4,13 +4,14 @@
 // across it in both directions, then collects fees, withdraws and burns. Every
 // step reads state back and asserts what it should be, so a silent accounting
 // error fails here rather than in the interface.
-import './lib/env.mjs';
+import { deploymentsPath } from './lib/env.mjs';
 import fs from 'node:fs';
 import {
   signerFromEnv, nonceOf, callContract, viewValue, currentEpoch,
 } from './lib/octra-chain.mjs';
 
-const d = JSON.parse(fs.readFileSync('deployments-cl.json', 'utf-8'));
+const OUT = deploymentsPath();
+const d = JSON.parse(fs.readFileSync(OUT, 'utf-8'));
 const signer = signerFromEnv();
 
 // The nonce is read fresh before every transaction rather than counted up from
@@ -51,7 +52,7 @@ if (!pool) {
     signer, nonce: await next(), label: 'create_pool', ou: '400000',
   });
   pool = await viewValue(d.factory, 'get_pool', [d.tokenA, d.tokenB, FEE]);
-  d.pools[FEE] = pool; fs.writeFileSync('deployments-cl.json', JSON.stringify(d, null, 2) + '\n');
+  d.pools[FEE] = pool; fs.writeFileSync(OUT, JSON.stringify(d, null, 2) + '\n');
 }
 console.log(`  pool ${pool}`);
 

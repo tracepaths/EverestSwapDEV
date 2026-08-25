@@ -20,6 +20,7 @@ contract EverestFactory {
     owner: address
     pending_owner: address
     pool_template: string
+    pool_template_bytes: int   // explicit: len() reads 1 on an unset string
     spawn_count: int
 
     // Enabled fee tiers, in hundredths of a bip, mapped to their tick spacing.
@@ -85,6 +86,7 @@ contract EverestFactory {
     require(caller == self.owner, "not owner")
     require(len(bytecode) > 0, "empty template")
     self.pool_template = bytecode
+    self.pool_template_bytes = len(bytecode)
     emit TemplateSet(len(bytecode))
     return true
   }
@@ -138,7 +140,7 @@ contract EverestFactory {
 
   nonreentrant fn create_pool(token_a: address, token_b: address, fee: int, sqrt_price: int): address {
     require(!self.paused, "factory paused")
-    require(len(self.pool_template) > 0, "pool template not set")
+    require(self.pool_template_bytes > 0, "pool template not set")
     assert_address(token_a)
     assert_address(token_b)
     require(token_a != token_b, "identical tokens")
@@ -202,7 +204,7 @@ contract EverestFactory {
   view fn get_pool_fee(p: address): int { return self.pool_fee[p] }
   view fn get_is_pool(p: address): bool { return self.is_pool[p] }
   view fn get_spawn_count(): int { return self.spawn_count }
-  view fn get_template_size(): int { return len(self.pool_template) }
+  view fn get_template_size(): int { return self.pool_template_bytes }
 
   // ── Packed readers ───────────────────────────────────────────────────
   //

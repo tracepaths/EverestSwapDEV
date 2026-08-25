@@ -17,12 +17,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentsPath } from './lib/env.mjs';
 import { viewValue } from './lib/octra-chain.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RPC = process.env.RPC_URL || 'https://devnet.octrascan.io/rpc';
 const NETWORK = process.env.NETWORK || (/mainnet/.test(RPC) ? 'mainnet' : 'devnet');
-const STATE = path.join(__dirname, '..', 'deployments-cl.json');
+const STATE = deploymentsPath();
 
 if (!fs.existsSync(STATE)) {
   console.error(`no ${path.basename(STATE)} — run scripts/deploy-cl.mjs first`);

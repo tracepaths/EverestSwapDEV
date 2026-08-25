@@ -137,6 +137,40 @@ export async function rpcCall(method, params, timeoutMs = DEFAULT_RPC_CALL_TIMEO
   return data.result;
 }
 
+// A rate-limited or momentarily unreachable node is backpressure, not a program
+// error. The public node answers 429 with an HTML page instead of JSON-RPC, and
+// a dropped socket or gateway timeout says nothing about whether the request was
+// valid. `view busy` is the same thing at contract granularity: the node
+// refusing a concurrent view on a contract that is already executing one.
+//
+// One canonical test lives here so a newly observed transient shape only has to
+// be recognised in a single place — it was previously spelled out three times,
+// each copy recognising a slightly different set.
+export function isTransientRpcError(msg) {
+  return /non-JSON|not valid JSON|Unexpected token|\b(429|502|503|504)\b|rate|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|timed out|fetch failed|view busy|busy/i.test(msg || '');
+}
+
+// `rpcCall` with exponential backoff, for methods that are safe to repeat.
+//
+// Reads and pure computations qualify. `octra_submit` deliberately does NOT: a
+// resend the node already accepted comes back as a duplicate rejection, which
+// would read as a failure for a transaction that in fact went through. Keeping
+// submission to a single attempt trades a rare retryable blip for never
+// misreporting a landed transaction.
+export async function rpcCallRetry(method, params, options = {}) {
+  const { timeoutMs = DEFAULT_RPC_CALL_TIMEOUT_MS, attempts = 7 } = options;
+  let delay = 600;
+  for (let i = 0; ; i++) {
+    try {
+      return await rpcCall(method, params, timeoutMs);
+    } catch (e) {
+      if (i >= attempts - 1 || !isTransientRpcError(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 8000);
+    }
+  }
+}
+
 // A transaction the node threw out never gets a receipt, so polling for one
 // looks exactly like a slow chain until the deadline expires. `octra_transaction`
 // answers for rejected transactions too and carries the reason, so it is checked

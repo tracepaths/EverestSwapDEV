@@ -5,14 +5,14 @@
 // hop has to survive being handed to a different pool. This opens A/B and B/C
 // pools, funds both, then trades A -> B -> C and back, exact-input and
 // exact-output, checking the router keeps nothing at the end.
-import './lib/env.mjs';
+import { deploymentsPath } from './lib/env.mjs';
 import fs from 'node:fs';
 import { compileFile } from './lib/aml.mjs';
 import {
   signerFromEnv, nonceOf, deployContract, callContract, viewValue, currentEpoch,
 } from './lib/octra-chain.mjs';
 
-const OUT = 'deployments-cl.json';
+const OUT = deploymentsPath();
 const d = JSON.parse(fs.readFileSync(OUT, 'utf-8'));
 const save = () => fs.writeFileSync(OUT, JSON.stringify(d, null, 2) + '\n');
 const signer = signerFromEnv();

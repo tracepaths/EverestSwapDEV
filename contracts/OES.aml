@@ -259,9 +259,15 @@ contract OES {
     require(!self.blacklisted[caller], "caller blacklisted")
     require(epoch >= self.last_reward_epoch, "epoch too low")
     require(epoch <= self.rewards_end_epoch, "past rewards end")
-    // [AUDIT-FIX NEW-20] Validate rewards_vault is configured
-    require(self.rewards_vault != origin, "rewards vault not configured")
-    require(self.rewards_vault != "", "rewards vault not configured")
+    // The vault starts out as the deployer and set_rewards_vault refuses to point
+    // it at the owner, so "still equal to the owner" is exactly "never configured".
+    //
+    // This deliberately does not compare against `origin`: `origin` is the caller
+    // here rather than the transaction's originator, so that form rejected the
+    // vault's own calls — the very caller authorised above — while letting the
+    // owner through, and it tested who was calling rather than whether the vault
+    // had been set at all.
+    require(self.rewards_vault != self.owner, "rewards vault not configured")
 
     let epochs_passed = epoch - self.last_reward_epoch
     require(epochs_passed > 0, "already distributed")
@@ -337,7 +343,10 @@ contract OES {
 
   fn accept_ownership(): bool {
     require(caller == self.pending_owner, "not pending owner")
-    require(self.pending_owner != "", "no pending transfer")
+    // Both forms: a slot that was never written reads back as "0", while one
+    // cleared by a completed transfer holds "". Testing only one leaves the guard
+    // unable to reject half the cases it exists for.
+    require(self.pending_owner != "" && self.pending_owner != "0", "no pending transfer")
     // [SECURITY] Validate against the vault snapshot taken at proposal time,
     // not the current rewards_vault (which may have been changed by a malicious
     // current owner to grief the transfer)

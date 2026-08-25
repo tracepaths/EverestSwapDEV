@@ -813,8 +813,10 @@ contract Token {
   fn accept_ownership(): bool {
     require(!self.locked, "reentrant call")
     self.locked = true
-    // [V7-PASS8] H-3 fix: guard against zero pending_owner
-    require(self.pending_owner != "", "no pending transfer")
+    // Both forms: a slot that was never written reads back as "0", while one
+    // cleared by a completed transfer holds "". Testing only one leaves the guard
+    // unable to reject half the cases it exists for.
+    require(self.pending_owner != "" && self.pending_owner != "0", "no pending transfer")
     require(caller == self.pending_owner, "not pending owner")
     let old_owner = self.owner
     self.owner = self.pending_owner

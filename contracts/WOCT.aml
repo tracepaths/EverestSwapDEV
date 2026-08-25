@@ -36,7 +36,7 @@ contract WOCT {
   event Paused(status: bool)
   // [V2-AUDIT-FIX V2-CRIT-4] Event for owner-rescue of unaccounted native OCT
   event NativeRescued(to: address, amount: int)
-  // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership events (mirrors SwapPool)
+  // Two-step ownership events, mirroring the other token contracts.
   event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
   event OwnershipTransferred(old_owner: address, new_owner: address)
   // [SECURITY] M-10: Event for max deposit limit changes
@@ -287,7 +287,10 @@ contract WOCT {
   // [V2-AUDIT-FIX V2-LOW-2] Step 2: proposed new owner must accept
   fn accept_ownership(): bool {
     require(caller == self.pending_owner, "not pending owner")
-    require(self.pending_owner != "", "no pending transfer")
+    // Both forms: a slot that was never written reads back as "0", while one
+    // cleared by a completed transfer holds "". Testing only one leaves the guard
+    // unable to reject half the cases it exists for.
+    require(self.pending_owner != "" && self.pending_owner != "0", "no pending transfer")
     let old_owner = self.owner
     self.owner = self.pending_owner
     // [SECURITY] Reset pending_owner to empty string (not origin) to prevent ownership hijack
