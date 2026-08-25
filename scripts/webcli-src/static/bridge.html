@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; connect-src 'self' http://178.62.60.204:8090 https://ethereum-sepolia-rpc.publicnode.com https://*.infura.io https://*.publicnode.com https://*.octra.network wss://* ws://*;">
+<title>octra bridge</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Tahoma,arial,sans-serif;background:#F0F2F5;color:#2B3A52;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:40px 16px;font-size:12px;letter-spacing:0.5px}
+.bridge-wrap{width:100%;max-width:460px;background:#fff;border:1px solid #D0D7E2;overflow:hidden}
+.bridge-header{padding:14px 20px;border-bottom:1px solid #E5E9EF;display:flex;align-items:center;justify-content:space-between}
+.bridge-header h1{font-size:14px;font-weight:600;color:#2B3A52}
+.connect-section{border-bottom:1px solid #E5E9EF}
+.connect-row{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid #F0F2F5}
+.connect-row:last-child{border-bottom:none}
+.connect-row .cr-left{display:flex;align-items:center;gap:8px}
+.connect-row .cr-chain{font-size:12px;font-weight:600;color:#2B3A52}
+.connect-row .cr-addr{font-size:10px;font-family:monospace;color:#4CAF50;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.connect-row .cr-addr.none{color:#E57373}
+.connect-row .cr-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.connect-row .cr-dot.on{background:#4CAF50}
+.connect-row .cr-dot.off{background:#E57373}
+.connect-btn{padding:5px 12px;font-size:11px;font-weight:500;border:1px solid #D0D7E2;background:#fff;color:#3B567F;cursor:pointer;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.connect-btn:hover{background:#F7F8FA}
+.connect-btn.connected{border-color:#4CAF50;color:#4CAF50;cursor:default}
+.dir-tabs{display:flex;border-bottom:1px solid #E5E9EF}
+.dir-tabs button{flex:1;padding:10px;font-size:12px;font-weight:500;border:none;background:#fff;cursor:pointer;color:#8C9DB6;border-bottom:2px solid transparent;transition:all 0.15s;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.dir-tabs button.active{color:#3B567F;border-bottom-color:#3B567F}
+.dir-tabs button:hover{background:#F7F8FA}
+.chain-bar{display:flex;align-items:center;gap:0;border-bottom:1px solid #E5E9EF}
+.chain-box{flex:1;padding:12px 20px;text-align:center}
+.chain-box .chain-label{font-size:10px;color:#8C9DB6;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.chain-box .chain-name{font-size:13px;font-weight:600;color:#2B3A52}
+.chain-box .chain-token{font-size:11px;color:#516E9A;margin-top:2px}
+.chain-arrow{width:40px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#8C9DB6;flex-shrink:0}
+.notice-bar{padding:10px 20px;background:#F7F8FA;border-bottom:1px solid #E5E9EF;font-size:11px;color:#8C9DB6;line-height:170%}
+.notice-bar .disclaimer{color:#B0B8C8;font-size:10px;margin-top:4px}
+.bridge-body{padding:16px 20px}
+.input-group{margin-bottom:14px}
+.input-group label{display:block;font-size:11px;color:#8C9DB6;letter-spacing:0.5px;margin-bottom:4px}
+.input-row{display:flex;align-items:center;border:1px solid #C0C6D0;overflow:hidden;transition:border-color 0.15s}
+.input-row:focus-within{border-color:#3B567F}
+.input-row input{flex:1;padding:10px;font-size:14px;font-family:monospace;border:none;outline:none;background:transparent}
+.input-row .token-label{padding:10px 14px;font-size:12px;font-weight:600;color:#3B567F;background:#F7F8FA;border-left:1px solid #E5E9EF;white-space:nowrap}
+.max-btn{padding:3px 7px;font-size:10px;color:#3B567F;background:#E5E9EF;border:none;cursor:pointer;margin-right:6px;font-weight:600}
+.max-btn:hover{background:#D0D7E2}
+.output-box{padding:10px;background:#F7F8FA;border:1px solid #E5E9EF;font-family:monospace;font-size:14px;color:#2B3A52;min-height:40px;display:flex;align-items:center;justify-content:space-between}
+.output-box .out-val{font-weight:600}
+.output-box .out-token{color:#8C9DB6;font-size:12px}
+.info-rows{margin:14px 0;font-size:12px;color:#516E9A}
+.info-rows .info-row{display:flex;justify-content:space-between;padding:3px 0}
+.info-rows .info-row .val{font-family:monospace;color:#2B3A52}
+.bridge-btn{width:100%;padding:12px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:#3B567F;color:#fff;transition:background 0.15s;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.bridge-btn:hover{background:#2B4060}
+.bridge-btn:disabled{background:#C0C6D0;cursor:not-allowed}
+.bridge-btn.loading{opacity:0.7;pointer-events:none}
+.balance-bar{padding:10px 20px;border-top:1px solid #E5E9EF;font-size:12px;color:#8C9DB6;display:flex;justify-content:space-between}
+.balance-bar .bal-val{font-family:monospace;color:#2B3A52;font-weight:500}
+.status-msg{padding:10px 20px;font-size:12px;text-align:center;display:none}
+.status-msg.ok{color:#4CAF50;display:block}
+.status-msg.err{color:#E57373;display:block}
+.status-msg.info{color:#516E9A;display:block}
+.modal-bg{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:none;justify-content:center;align-items:center;z-index:100}
+.modal-bg.show{display:flex}
+.modal-box{background:#fff;padding:20px;width:90%;max-width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.15);border:1px solid #D0D7E2}
+.modal-box h2{font-size:14px;margin-bottom:14px;color:#2B3A52;font-weight:600}
+.modal-box .confirm-detail{margin-bottom:14px;font-size:12px;color:#516E9A;line-height:1.7}
+.modal-box .confirm-detail .cd-row{display:flex;justify-content:space-between;padding:3px 0}
+.modal-box .confirm-detail .cd-val{font-family:monospace;font-weight:400;color:#2B3A52;word-break:break-all;max-width:220px;text-align:right}
+.modal-btns{display:flex;gap:8px}
+.modal-btns button{flex:1;padding:10px;font-size:12px;font-weight:500;border:none;cursor:pointer;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.modal-btns .btn-cancel{background:#E5E9EF;color:#516E9A}
+.modal-btns .btn-cancel:hover{background:#D0D7E2}
+.modal-btns .btn-confirm{background:#3B567F;color:#fff}
+.modal-btns .btn-confirm:hover{background:#2B4060}
+.progress-steps{margin:10px 0;font-size:12px;color:#8C9DB6}
+.progress-steps .step{padding:4px 0;display:flex;align-items:center;gap:8px}
+.progress-steps .step .dot{width:8px;height:8px;border-radius:50%;background:#C0C6D0;flex-shrink:0}
+.progress-steps .step.active .dot{background:#3B567F}
+.progress-steps .step.done .dot{background:#4CAF50}
+.progress-steps .step.fail .dot{background:#E57373}
+.progress-steps .step.active{color:#3B567F;font-weight:500}
+.progress-steps .step.done{color:#4CAF50}
+.progress-steps .step.fail{color:#E57373}
+.warning-box{margin:10px 0;padding:10px;background:#FFF8E1;border:1px solid #FFE082;font-size:11px;color:#795548;line-height:160%}
+.footer-bar{padding:10px 20px;border-top:1px solid #E5E9EF;text-align:center;font-size:10px;color:#8C9DB6}
+.footer-bar a{color:#8C9DB6;text-decoration:none;border-bottom:1px solid #D0D7E2}
+.history-section{border-top:1px solid #E5E9EF;padding:10px 20px}
+.history-section .hs-title{font-size:11px;color:#8C9DB6;letter-spacing:0.5px;margin-bottom:6px;text-transform:uppercase}
+.history-list .hs-item{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0F2F5;font-size:11px;gap:8px}
+.history-list .hs-item:last-child{border-bottom:none}
+.history-list .hs-item .hs-main{flex:1;min-width:0;overflow:hidden}
+.history-list .hs-item .hs-top{color:#2B3A52}
+.history-list .hs-item .hs-amount{font-weight:600;color:#2B3A52}
+.history-list .hs-item .hs-to{font-family:monospace;font-size:10px;color:#516E9A}
+.history-list .hs-item .hs-time{color:#8C9DB6;font-size:10px;margin-top:1px}
+.history-list .hs-item .hs-status{font-size:10px;padding:3px 8px;border:1px solid #D0D7E2;white-space:nowrap;font-weight:500;min-width:110px;box-sizing:border-box;text-align:center;display:inline-block}
+.history-list .hs-item .hs-status.pending{color:#8C9DB6;border-color:#E5E9EF}
+.history-list .hs-item .hs-status.claimable{color:#fff;background:#4CAF50;border-color:#4CAF50;cursor:pointer}
+.history-list .hs-item .hs-status.claimable:hover{background:#43A047}
+.history-list .hs-item .hs-status.claimed{color:#4CAF50;border-color:#C8E6C9;background:#F1F8E9}
+.history-list .hs-item .hs-status.expired{color:#E57373;border-color:#FFCDD2}
+.history-list .hs-item .hs-status.failed{color:#E57373;border-color:#FFCDD2}
+.history-list .hs-item .hs-status.claiming{color:#FF9800;border-color:#FFE0B2;cursor:wait}
+.hs-actions{display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:#8C9DB6}
+.hs-actions a{color:#8C9DB6;cursor:pointer;text-decoration:underline}
+@media(max-width:500px){body{padding:0;align-items:stretch}.bridge-wrap{border:none;min-height:100vh}}
+</style>
+</head>
+<body>
+<div class="bridge-wrap" id="app">
+  <div class="bridge-header">
+    <h1>octra bridge</h1>
+    <span style="font-size:10px;color:#8C9DB6">v1 experimental</span>
+  </div>
+
+  <div class="connect-section">
+    <div class="connect-row">
+      <div class="cr-left">
+        <span class="cr-dot off" id="octra-dot"></span>
+        <span class="cr-chain">octra</span>
+        <span class="cr-addr none" id="octra-addr">not connected</span>
+      </div>
+      <button class="connect-btn" id="octra-connect-btn" data-action="connectOctra">connect</button>
+    </div>
+    <div class="connect-row">
+      <div class="cr-left">
+        <span class="cr-dot off" id="eth-dot"></span>
+        <span class="cr-chain">ethereum</span>
+        <span class="cr-addr none" id="eth-addr">not connected</span>
+      </div>
+      <button class="connect-btn" id="eth-connect-btn" data-action="connectEth">connect MetaMask</button>
+    </div>
+  </div>
+
+  <div class="dir-tabs">
+    <button id="tab-o2e" class="active" data-action="setDir" data-arg="o2e">OCT -> wOCT</button>
+    <button id="tab-e2o" data-action="setDir" data-arg="e2o">wOCT -> OCT</button>
+  </div>
+
+  <div class="chain-bar">
+    <div class="chain-box">
+      <div class="chain-label">from</div>
+      <div class="chain-name" id="from-chain">octra</div>
+      <div class="chain-token" id="from-token">OCT</div>
+    </div>
+    <div class="chain-arrow">-></div>
+    <div class="chain-box">
+      <div class="chain-label">to</div>
+      <div class="chain-name" id="to-chain">ethereum</div>
+      <div class="chain-token" id="to-token">wOCT</div>
+    </div>
+  </div>
+
+  <div class="notice-bar">
+    <div id="notice-text">lock OCT on octra, receive wOCT on ethereum</div>
+  </div>
+
+  <div class="bridge-body">
+    <div class="input-group">
+      <label>amount</label>
+      <div class="input-row">
+        <input type="text" id="bridge-amount" placeholder="0.0" inputmode="decimal" autocomplete="off" data-input="validateForm">
+        <button class="max-btn" data-action="setMax">max</button>
+        <div class="token-label" id="input-token">OCT</div>
+      </div>
+    </div>
+
+    <div class="input-group" id="recipient-group">
+      <label id="recipient-label">recipient</label>
+      <div class="input-row">
+        <input type="text" id="recipient" placeholder="0x..." autocomplete="off" spellcheck="false" data-input="validateForm">
+      </div>
+    </div>
+
+    <div class="input-group">
+      <label>you will receive</label>
+      <div class="output-box">
+        <span class="out-val" id="output-val">0</span>
+        <span class="out-token" id="output-token">wOCT</span>
+      </div>
+    </div>
+
+    <div class="info-rows">
+      <div class="info-row"><span>fee</span><span class="val">0</span></div>
+      <div class="info-row"><span>estimated time</span><span class="val">~2 min</span></div>
+    </div>
+
+    <button class="bridge-btn" id="bridge-btn" data-action="doBridge" disabled>connect both wallets</button>
+  </div>
+
+  <div id="status-area" class="status-msg"></div>
+  <div id="progress-area" class="progress-steps" style="display:none;padding:0 20px 14px"></div>
+
+  <div class="history-section" id="history-section" style="display:none">
+    <div class="history-list" id="history-list"></div>
+    <div class="hs-actions">
+      <a href="#" data-action="historyRefreshAll" data-prevent="1">refresh status</a>
+      <a href="#" data-action="recoveryFetch" data-prevent="1">recover from network</a>
+      <a href="#" data-action="historyClearOld" data-prevent="1">clear old (&gt;24h)</a>
+    </div>
+  </div>
+
+  <div class="balance-bar">
+    <div>OCT: <span class="bal-val" id="bal-oct">-</span></div>
+    <div>wOCT: <span class="bal-val" id="bal-woct">-</span></div>
+  </div>
+
+  <div class="footer-bar">
+    octra bridge v1 | this project is in beta | use at your own risk<br>
+    <a href="https://octrascan.io" target="_blank">octra explorer</a> |
+    <a href="https://etherscan.io" target="_blank">etherscan</a>
+  </div>
+
+  <div class="modal-bg" id="confirm-modal">
+    <div class="modal-box">
+      <h2 id="cm-title">confirm bridge</h2>
+      <div class="confirm-detail">
+        <div class="cd-row"><span>action</span><span class="cd-val" id="cm-action"></span></div>
+        <div class="cd-row"><span>amount</span><span class="cd-val" id="cm-amount"></span></div>
+        <div class="cd-row"><span>from</span><span class="cd-val" id="cm-from"></span></div>
+        <div class="cd-row"><span>to</span><span class="cd-val" id="cm-to"></span></div>
+        <div class="cd-row"><span>receive</span><span class="cd-val" id="cm-receive"></span></div>
+      </div>
+      <div class="warning-box" id="cm-warning"></div>
+      <div class="modal-btns" style="margin-top:14px">
+        <button class="btn-cancel" data-action="closeModal">cancel</button>
+        <button class="btn-confirm" id="cm-confirm-btn" data-action="confirmBridge">confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="wallet-modal">
+    <div class="modal-box">
+      <h2>connect wallet</h2>
+      <div id="wallet-list"></div>
+      <div class="modal-btns" style="margin-top:14px">
+        <button class="btn-cancel" data-action="closeWalletModal">cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="bridge.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+octra_wallet
+octra_wallet.exe
+*.o
+*.dll
+data/
+*.oct
+pvac/build/
+.DS_Store

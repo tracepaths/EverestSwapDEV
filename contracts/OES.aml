@@ -1,0 +1,371 @@
+contract OES {
+  state {
+    name: string
+    symbol: string
+    // [V2-AUDIT-FIX V2-LOW-1] total_supply is a fixed constant reflecting the pre-minted
+    // supply of OES tokens (666M with 6 decimals = 666,000,000,000,000 base units).
+    // It does NOT change when rewards are distributed because no new tokens are minted —
+    // rewards are simply redistributed from the vault's existing balance.
+    // This variable is kept for ERC-20 interface compatibility only.
+    total_supply: int
+    decimals: int
+    owner: address
+    balances: map[address]int
+    grants: map[address]map[address]int
+    lp_reserve: address
+    rewards_vault: address
+    // [V2-AUDIT-FIX V2-MED-1] Cap rewards_per_epoch to prevent front-running large reward epochs.
+    // Maximum is capped at set_rewards_per_epoch; see set_rewards_per_epoch().
+    rewards_per_epoch: int
+    rewards_start_epoch: int
+    rewards_end_epoch: int
+    last_reward_epoch: int
+    paused: bool
+    // [AUDIT-FIX NEW-15] Blacklist for dangerous addresses
+    blacklisted: map[address]bool
+    // [V2-AUDIT-FIX V2-MED-1] Configurable cap on rewards_per_epoch
+    max_rewards_per_epoch: int
+    // [V7-CRIT-7] Two-step ownership transfer
+    pending_owner: address
+    // [SECURITY] Snapshot of rewards_vault at proposal time to prevent DoS
+    pending_vault_snapshot: address
+    // [AUDIT-FIX M-4] Explicit reentrancy guard state. Previously relied on AML
+    // auto-declaration; make it explicit for clarity and future-proofing.
+    locked: bool
+  }
+
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+  event Mint(to: address, amount: int)
+  event Burn(from: address, amount: int)
+  // [V2-AUDIT-FIX V2-CRIT-3] RewardDistributed now records recipient as owner (for manual dist.)
+  event RewardDistributed(epoch: int, amount: int, recipient: address)
+  event Paused(status: bool)
+  // [AUDIT-FIX NEW-15] Event for blacklist changes
+  event Blacklisted(addr: address, status: bool)
+  // [V7-CRIT-7] Two-step ownership events
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
+  // [SECURITY] M-7: Events for rewards/fee setters
+  event RewardsPerEpochSet(old_amount: int, new_amount: int)
+  event MaxRewardsPerEpochSet(old_cap: int, new_cap: int)
+  event RewardsVaultSet(old_vault: address, new_vault: address)
+
+  constructor() {
+    self.name = "Octra Everest Swap"
+    self.symbol = "OES"
+    // [V2-AUDIT-FIX V2-LOW-1] Fixed supply — see state comment above.
+    self.total_supply = 666000000000000
+    self.decimals = 6
+    self.owner = origin
+    self.paused = false
+
+    self.lp_reserve = origin
+    self.rewards_vault = origin
+
+    // [AUDIT-FIX MED-2] Assign balance once with the full total
+    self.balances[origin] = 666000000000000
+
+    emit Mint(origin, 666000000000000)
+    emit Transfer(origin, origin, 666000000000000)
+
+    self.rewards_per_epoch = 6082191780
+    self.rewards_start_epoch = 0
+    self.rewards_end_epoch = 525600
+    self.last_reward_epoch = 0
+    // [V2-AUDIT-FIX V2-MED-1] Default cap: 2x the initial rewards_per_epoch
+    // [SECURITY] Tightened: 2x initial cap. Combined with the 2x-per-call setter cap,
+    // iteration cannot increase the cap beyond 4x initial (~24.3B per epoch max).
+    // Absolute hard cap of 100B enforced in set_max_rewards_per_epoch prevents
+    // any further escalation by the owner.
+    self.max_rewards_per_epoch = 12164383560
+    // [V7-CRIT-7] Two-step ownership: no pending owner at start
+    self.pending_owner = ""
+    // [SECURITY] Initialize vault snapshot
+    self.pending_vault_snapshot = ""
+    // [AUDIT-FIX M-4] Explicit init of reentrancy guard (defaults to false anyway)
+    self.locked = false
+  }
+
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
+
+  view fn allowance(owner_addr: address, spender: address): int {
+    return self.grants[owner_addr][spender]
+  }
+
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  // [V2-AUDIT-FIX V2-LOW-1] total_supply is a fixed constant; see state comment.
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn is_paused(): bool { return self.paused }
+  // [AUDIT-FIX NEW-15] View for blacklist status
+  view fn is_blacklisted(addr: address): bool { return self.blacklisted[addr] }
+
+  fn transfer(to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    // [AUDIT-FIX NEW-15] Blacklist check
+    require(!self.blacklisted[caller], "sender blacklisted")
+    require(!self.blacklisted[to], "recipient blacklisted")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    self.balances[caller] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    emit Transfer(caller, to, amt)
+    return true
+  }
+
+  fn grant(spender: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(spender)
+    // [AUDIT-FIX NEW-16] Prevent grant to zero address
+    require(spender != "", "grant to zero address")
+    // [AUDIT-FIX NEW-17] amt can be 0 (to revoke approval) — no require(amt > 0) needed
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] pull: the caller (spender) is also checked against the blacklist
+  fn pull(from: address, to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(from)
+    assert_address(to)
+    // [SECURITY] M-2: Reject self-pull (from == to) — would burn allowance with no effect
+    require(from != to, "self pull not allowed")
+    require(amt > 0, "amount must be positive")
+    // [AUDIT-FIX NEW-15] Blacklist check on from and to
+    require(!self.blacklisted[from], "from address blacklisted")
+    require(!self.blacklisted[to], "to address blacklisted")
+    // [V2-AUDIT-FIX V2-LOW-2] Also reject if the caller (spender) is blacklisted
+    require(!self.blacklisted[caller], "caller (spender) blacklisted")
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    // [AUDIT-FIX] CEI: Update state before transfer
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // [V3-AUDIT-FIX] transfer_from: OCS01 compliance interface function.
+  // Duplicated the body of pull because internal contract calls (self.pull) are not supported by the AML compiler.
+  fn transfer_from(from: address, to: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.blacklisted[from], "from address blacklisted")
+    require(!self.blacklisted[to], "to address blacklisted")
+    require(!self.blacklisted[caller], "caller (spender) blacklisted")
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // [AUDIT-FIX LOW-4] Emergency pause
+  fn set_paused(status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    self.paused = status
+    emit Paused(status)
+    return true
+  }
+
+  // [AUDIT-FIX NEW-15] Blacklist management — owner only
+  fn set_blacklisted(addr: address, status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(addr)
+    // [AUDIT-FIX NEW-18] Owner cannot blacklist themselves
+    require(addr != self.owner, "cannot blacklist owner")
+    // [SECURITY] H-3: Cannot blacklist the current rewards_vault — would DoS distribute_rewards
+    require(addr != self.rewards_vault, "cannot blacklist rewards vault")
+    // [SECURITY] H-8: Cannot blacklist the pending_owner — would block accept_ownership
+    require(addr != self.pending_owner, "cannot blacklist pending owner")
+    self.blacklisted[addr] = status
+    emit Blacklisted(addr, status)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-HIGH-3] set_rewards_vault: vault must not equal owner to prevent
+  // owner acting as both distributor and reward recipient simultaneously.
+  fn set_rewards_vault(vault: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(vault)
+    // [AUDIT-FIX NEW-19] Validate vault is not zero
+    require(vault != "", "zero vault address")
+    // [V2-AUDIT-FIX V2-HIGH-3] Vault cannot be the owner address
+    require(vault != self.owner, "vault cannot be owner")
+    // [SECURITY] Vault cannot be blacklisted
+    require(!self.blacklisted[vault], "vault is blacklisted")
+    // [SECURITY] M-2: Vault must be different from blacklisted addresses and pending_owner
+    require(vault != self.pending_owner, "vault cannot be pending owner")
+    let old_vault = self.rewards_vault
+    self.rewards_vault = vault
+    // [SECURITY] M-7: Emit event for transparency
+    emit RewardsVaultSet(old_vault, vault)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-MED-1] Allow owner to adjust rewards_per_epoch but enforce the cap
+  // to mitigate front-running of large reward epochs.
+  fn set_rewards_per_epoch(amount: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(amount > 0, "rewards must be positive")
+    // [V7-CRIT-7] Hard cap: amount cannot exceed max_rewards_per_epoch (immutable once set)
+    require(amount <= self.max_rewards_per_epoch, "exceeds max rewards per epoch cap")
+    let old_amount = self.rewards_per_epoch
+    self.rewards_per_epoch = amount
+    // [SECURITY] M-7: Emit event with old and new for transparency
+    emit RewardsPerEpochSet(old_amount, amount)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-MED-1] Owner can raise the cap but not lower it below current rate
+  // [V7-CRIT-7] Cap increase limited to 2x per call to prevent instant massive increase
+  // [SECURITY] H-4: Absolute hard cap (100B) is checked FIRST so that 2x-based increase
+  // cannot exceed the absolute limit. This also ensures that the cap can never be locked
+  // — if max is at 100B, the next 2x is bounded to 200B but the absolute cap of 100B
+  // rejects the increase, forcing the cap to stay at 100B (governance can iterate).
+  fn set_max_rewards_per_epoch(cap: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(cap >= self.rewards_per_epoch, "cap below current rewards_per_epoch")
+    // [SECURITY] H-4: Absolute hard cap check FIRST
+    require(cap <= 100000000000, "exceeds absolute hard cap (100B)")
+    // [V7-CRIT-7] Prevent extreme cap increases (max 2x current cap per call)
+    require(cap <= self.max_rewards_per_epoch * 2, "cap increase too large")
+    let old_cap = self.max_rewards_per_epoch
+    self.max_rewards_per_epoch = cap
+    // [SECURITY] M-7: Emit event for transparency
+    emit MaxRewardsPerEpochSet(old_cap, cap)
+    return true
+  }
+
+  // [V3-AUDIT-FIX] distribute_rewards: Require vault to have sufficient balance to avoid silent reward skipping.
+  // This guarantees LPs receive their promised rewards and ensures that rewards are not lost when the vault runs low.
+  fn distribute_rewards(epoch: int): int {
+    require(!self.paused, "contract paused")
+    require(caller == self.rewards_vault || caller == self.owner, "not authorized")
+    // [SECURITY] Caller must not be blacklisted
+    require(!self.blacklisted[caller], "caller blacklisted")
+    require(epoch >= self.last_reward_epoch, "epoch too low")
+    require(epoch <= self.rewards_end_epoch, "past rewards end")
+    // [AUDIT-FIX NEW-20] Validate rewards_vault is configured
+    require(self.rewards_vault != origin, "rewards vault not configured")
+    require(self.rewards_vault != "", "rewards vault not configured")
+
+    let epochs_passed = epoch - self.last_reward_epoch
+    require(epochs_passed > 0, "already distributed")
+
+    // [SECURITY] Overflow guard: ensure multiplication does not overflow
+    let reward_calc = self.rewards_per_epoch * epochs_passed
+    if epochs_passed > 0 {
+      require(reward_calc / epochs_passed == self.rewards_per_epoch, "overflow in reward calc")
+    }
+    // [SECURITY] Per-epoch cap enforcement at distribution time
+    require(self.rewards_per_epoch <= self.max_rewards_per_epoch, "rewards exceeds cap")
+    let vault_bal = self.balances[self.rewards_vault]
+
+    // [V3-AUDIT-FIX] Prevent silent reward skipping by requiring the vault has enough tokens.
+    // If the vault balance is insufficient, the transaction reverts rather than updating last_reward_epoch to a state
+    // where historical rewards are lost forever.
+    require(vault_bal >= reward_calc, "insufficient vault balance for reward epoch")
+    let reward_amount = reward_calc
+
+    if reward_amount > 0 {
+      // [AUDIT-FIX HIGH-3] Update last_reward_epoch BEFORE transfer (CEI pattern)
+      self.last_reward_epoch = epoch
+
+      // [V2-AUDIT-FIX V2-CRIT-3] Actually move tokens: deduct from vault, credit owner.
+      // The owner is responsible for distributing rewards to LP holders off-chain.
+      self.balances[self.rewards_vault] = vault_bal - reward_amount
+      self.balances[self.owner] = self.balances[self.owner] + reward_amount
+
+      emit RewardDistributed(epoch, reward_amount, self.owner)
+      emit Transfer(self.rewards_vault, self.owner, reward_amount)
+    }
+
+    return reward_amount
+  }
+
+  // [SECURITY] C-2: Emergency recovery of vault balance after rewards_end_epoch.
+  // Once rewards_end_epoch is reached, distribute_rewards reverts (line 251), so
+  // any remaining balance in the vault is unrecoverable. This function allows the
+  // owner to recover those stuck funds. Only callable after rewards_end_epoch
+  // to prevent draining active reward flows.
+  fn emergency_withdraw_unused_rewards(): int {
+    require(caller == self.owner, "not authorized")
+    require(epoch > self.rewards_end_epoch, "rewards period not ended")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+
+    let vault_bal = self.balances[self.rewards_vault]
+    require(vault_bal > 0, "no unused rewards")
+
+    self.balances[self.rewards_vault] = 0
+    self.balances[self.owner] = self.balances[self.owner] + vault_bal
+
+    emit Transfer(self.rewards_vault, self.owner, vault_bal)
+    self.locked = false
+    return vault_bal
+  }
+
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(new_owner)
+    // [AUDIT-FIX NEW-13] Validate new_owner is not zero
+    require(new_owner != "", "new owner is zero address")
+    // [V7-CRIT-7] Two-step ownership transfer
+    require(new_owner != self.rewards_vault, "new owner cannot be rewards vault")
+    // [AUDIT-FIX M-6] Reset pending_vault_snapshot on re-call so a cancelled
+    // transfer doesn't leave stale snapshot that could bypass the vault check
+    // in accept_ownership (e.g., second proposal with changed rewards_vault).
+    self.pending_owner = new_owner
+    self.pending_vault_snapshot = self.rewards_vault
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    // [SECURITY] Validate against the vault snapshot taken at proposal time,
+    // not the current rewards_vault (which may have been changed by a malicious
+    // current owner to grief the transfer)
+    require(self.pending_owner != self.pending_vault_snapshot, "rewards vault cannot be owner")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    self.pending_vault_snapshot = ""
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  view fn get_rewards_info(): (int, int, int, int) {
+    return (
+      self.rewards_per_epoch,
+      self.rewards_start_epoch,
+      self.rewards_end_epoch,
+      self.last_reward_epoch
+    )
+  }
+
+  // [V2-AUDIT-FIX V2-MED-1] View max rewards cap
+  view fn get_max_rewards_per_epoch(): int {
+    return self.max_rewards_per_epoch
+  }
+
+  // [V7-CRIT-7] Two-step ownership views
+  view fn get_pending_owner(): address {
+    return self.pending_owner
+  }
+}

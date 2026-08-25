@@ -1,0 +1,242 @@
+// EverestSwap pool factory.
+//
+// Owns the fee-tier registry and is the only place pools are created from, so
+// a pool's address is enough to prove it came from here. Each pair may have one
+// pool per enabled fee tier: a tight tier for correlated assets, a wide one for
+// volatile pairs.
+//
+// Pools are spawned from stored bytecode, then configured and priced in the
+// same transaction. Nothing can observe or trade against a pool between its
+// deployment and its first price, which closes the window a front-runner would
+// otherwise use to set the opening price themselves.
+//
+// Token order is whatever the creator passed; the pool is self-consistent
+// either way, and the registry indexes both directions so lookups never need to
+// know which side is which. Callers that need the canonical order read
+// get_token0 from the pool.
+
+contract EverestFactory {
+  state {
+    owner: address
+    pending_owner: address
+    pool_template: string
+    spawn_count: int
+
+    // Enabled fee tiers, in hundredths of a bip, mapped to their tick spacing.
+    // A spacing of 0 means the tier is not enabled.
+    fee_spacing: map[int]int
+    fee_count: int          // explicit: len() on a state list always reads 1
+    fee_list: list[int]
+
+    // token -> token -> fee tier -> pool, populated in both directions.
+    pool_of: map[address]map[address]map[int]address
+    pools: list[address]
+    pool_count: int
+
+    pool_token0: map[address]address
+    pool_token1: map[address]address
+    pool_fee: map[address]int
+    is_pool: map[address]bool
+
+    paused: bool
+  }
+
+  event PoolCreated(token0: address, token1: address, fee: int, tick_spacing: int, pool: address)
+  event FeeTierEnabled(fee: int, tick_spacing: int)
+  event TemplateSet(size: int)
+  event OwnerTransferProposed(current: address, pending: address)
+  event OwnerTransferred(previous: address, current: address)
+  event PausedSet(paused: bool)
+
+  constructor() {
+    self.owner = caller
+    self.pending_owner = ""
+    self.pool_count = 0
+    self.spawn_count = 0
+    self.paused = false
+    // Four tiers covering the usual spread of pair behaviour. Spacing scales
+    // with the tier so that one tick is worth roughly the same fraction of the
+    // fee in every tier.
+    self.fee_count = 0
+    self.fee_spacing[100] = 1
+    self.fee_list.push(100)
+    self.fee_count += 1
+    self.fee_spacing[500] = 10
+    self.fee_list.push(500)
+    self.fee_count += 1
+    self.fee_spacing[3000] = 60
+    self.fee_list.push(3000)
+    self.fee_count += 1
+    self.fee_spacing[10000] = 200
+    self.fee_list.push(10000)
+    self.fee_count += 1
+  }
+
+  // ── Administration ───────────────────────────────────────────────────
+
+  // An address that was never written reads back as "0" rather than empty, and an
+  // explicitly cleared one reads back as empty, so emptiness has to cover both.
+  // Testing it any other way silently inverts every one-time-setter guard.
+  view fn unset(a: address): bool {
+    return a == "0" || a == ""
+  }
+
+  fn set_pool_template(bytecode: string): bool {
+    require(caller == self.owner, "not owner")
+    require(len(bytecode) > 0, "empty template")
+    self.pool_template = bytecode
+    emit TemplateSet(len(bytecode))
+    return true
+  }
+
+  // Two-step handover so a mistyped address cannot orphan the factory.
+  fn propose_owner(next: address): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(next)
+    self.pending_owner = next
+    emit OwnerTransferProposed(self.owner, next)
+    return true
+  }
+
+  fn accept_owner(): bool {
+    require(!unset(self.pending_owner), "no pending owner")
+    require(caller == self.pending_owner, "not pending owner")
+    let prev = self.owner
+    self.owner = caller
+    self.pending_owner = ""
+    emit OwnerTransferred(prev, self.owner)
+    return true
+  }
+
+  // 1 pauses new pool creation, 0 lifts it. An int rather than a bool because a
+  // flag arriving as text reads as true whatever it said, and a pause nobody can
+  // lift is a poor way to learn that.
+  fn set_paused(p: int): bool {
+    require(caller == self.owner, "not owner")
+    let on = p != 0
+    self.paused = on
+    emit PausedSet(on)
+    return true
+  }
+
+  // Tiers can be added but never removed or altered: pools already deployed
+  // against a tier keep their spacing forever, so mutating one would split the
+  // meaning of a tier between old and new pools.
+  fn enable_fee_tier(fee: int, s: int): bool {
+    require(caller == self.owner, "not owner")
+    require(fee > 0 && fee < 1000000, "fee out of range")
+    require(s > 0 && s <= 16384, "tick spacing out of range")
+    require(self.fee_spacing[fee] == 0, "fee tier already enabled")
+    self.fee_spacing[fee] = s
+    self.fee_list.push(fee)
+    self.fee_count += 1
+    emit FeeTierEnabled(fee, s)
+    return true
+  }
+
+  // ── Pool creation ────────────────────────────────────────────────────
+
+  nonreentrant fn create_pool(token_a: address, token_b: address, fee: int, sqrt_price: int): address {
+    require(!self.paused, "factory paused")
+    require(len(self.pool_template) > 0, "pool template not set")
+    assert_address(token_a)
+    assert_address(token_b)
+    require(token_a != token_b, "identical tokens")
+    let s = self.fee_spacing[fee]
+    require(s > 0, "fee tier not enabled")
+    require(unset(self.pool_of[token_a][token_b][fee]), "pool already exists")
+    require(unset(self.pool_of[token_b][token_a][fee]), "pool already exists")
+    require(sqrt_price > 0, "price not set")
+
+    let p = deploy(self.pool_template)
+    self.spawn_count = self.spawn_count + 1
+    require(call(p, "configure", [token_a, token_b, fee, s]), "pool configure failed")
+    require(call(p, "initialize", [sqrt_price]), "pool initialize failed")
+
+    self.pool_of[token_a][token_b][fee] = p
+    self.pool_of[token_b][token_a][fee] = p
+    self.pool_token0[p] = token_a
+    self.pool_token1[p] = token_b
+    self.pool_fee[p] = fee
+    self.is_pool[p] = true
+    self.pools.push(p)
+    self.pool_count = self.pool_count + 1
+
+    emit PoolCreated(token_a, token_b, fee, s, p)
+    return p
+  }
+
+  // ── Protocol fee, proxied so pools have a single administrator ───────
+
+  fn set_fee_protocol(pool: address, den0: int, den1: int): bool {
+    require(caller == self.owner, "not owner")
+    require(self.is_pool[pool], "not a pool")
+    require(call(pool, "set_fee_protocol", [den0, den1]), "set failed")
+    return true
+  }
+
+  fn collect_protocol(pool: address, recipient: address, amount0: int, amount1: int): bool {
+    require(caller == self.owner, "not owner")
+    require(self.is_pool[pool], "not a pool")
+    assert_address(recipient)
+    require(call(pool, "collect_protocol", [recipient, amount0, amount1]), "collect failed")
+    return true
+  }
+
+  // ── Views ────────────────────────────────────────────────────────────
+
+  view fn get_pool(token_a: address, token_b: address, fee: int): address {
+    return self.pool_of[token_a][token_b][fee]
+  }
+
+  view fn get_owner(): address { return self.owner }
+  view fn get_pending_owner(): address { return self.pending_owner }
+  view fn is_paused(): bool { return self.paused }
+  view fn get_fee_tier_spacing(fee: int): int { return self.fee_spacing[fee] }
+  view fn get_fee_tier_count(): int { return self.fee_count }
+  view fn get_fee_tier_at(i: int): int { return self.fee_list[i] }
+  view fn get_pool_count(): int { return self.pool_count }
+  view fn get_pool_at(i: int): address { return self.pools[i] }
+  view fn get_pool_token0(p: address): address { return self.pool_token0[p] }
+  view fn get_pool_token1(p: address): address { return self.pool_token1[p] }
+  view fn get_pool_fee(p: address): int { return self.pool_fee[p] }
+  view fn get_is_pool(p: address): bool { return self.is_pool[p] }
+  view fn get_spawn_count(): int { return self.spawn_count }
+  view fn get_template_size(): int { return len(self.pool_template) }
+
+  // ── Packed readers ───────────────────────────────────────────────────
+  //
+  // An interface listing pools would otherwise need four round trips per pool.
+  // Collections cannot be returned, so the rows are serialized instead.
+
+  // Rows of "address|token0|token1|fee;" for pools [start, start+count).
+  // Reading past the end simply stops, so a caller can page without first
+  // asking how many there are.
+  view fn pool_list_packed(start: int, count: int): string {
+    require(start >= 0 && count > 0 && count <= 256, "bad page")
+    let i = start
+    let stop = min(start + count, self.pool_count)
+    let out = ""
+    while i < stop {
+      let p = self.pools[i]
+      let row = concat(concat(to_string(p), "|"), concat(to_string(self.pool_token0[p]), "|"))
+      let tail = concat(concat(to_string(self.pool_token1[p]), "|"), concat(to_string(self.pool_fee[p]), ";"))
+      out = concat(out, concat(row, tail))
+      i = i + 1
+    }
+    return out
+  }
+
+  // Enabled fee tiers as "fee:spacing;" repeated, for a fee-tier selector.
+  view fn fee_tiers_packed(): string {
+    let i = 0
+    let n = self.fee_count
+    let out = ""
+    while i < n {
+      let f = self.fee_list[i]
+      out = concat(out, concat(to_string(f), concat(":", concat(to_string(self.fee_spacing[f]), ";"))))
+      i = i + 1
+    }
+    return out
+  }
+}

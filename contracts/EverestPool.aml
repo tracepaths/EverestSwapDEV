@@ -1,0 +1,1665 @@
+// EverestSwap concentrated-liquidity pool.
+//
+// Liquidity is supplied over a bounded price range rather than across the whole
+// curve, so each provider chooses the ticks between which their capital is
+// active. Price is tracked as a Q64.96 square root; the active range boundaries
+// are indexed by a bitmap so a swap can find the next boundary it will cross
+// without scanning.
+//
+// Three VM facts shape the whole file:
+//   * integers are arbitrary precision, so there is no overflow to guard and
+//     no wraparound trick available for signed fee accounting;
+//   * `/` and `%` truncate toward zero, so anything indexing a signed tick
+//     uses floor_div/floor_mod from the math include;
+//   * `for` executes a single iteration, so every loop here is a `while`, and
+//     helpers are never recursive.
+//
+// One VM fact shapes the signatures: a boolean handed to another contract
+// arrives as `true` whatever it was, because the argument is carried as text and
+// any text reads as true. So a trade direction crosses a boundary as `dir`, an
+// int, where 1 sells token0 for token1 and 0 sells token1 for token0. Booleans
+// are still safe inside the contract and are used freely there.
+//
+// Payment is pull-based: the pool moves tokens itself via the token's `pull`,
+// charging whoever called it. There is no callback into the payer, so a swap
+// cannot re-enter through the settlement path. `caller` is always the payer;
+// note that `origin` is an alias for `caller` on this VM and must never be
+// used to identify an end user behind a router hop.
+
+contract EverestPool {
+  state {
+    // ── configuration, written once by whoever deployed the pool ──
+    deployer: address
+    factory: address
+    token0: address
+    token1: address
+    fee_pips: int            // fee in hundredths of a bip; 3000 = 0.30%
+    spacing: int
+    max_liq_per_tick: int
+    configured: bool
+
+    // ── current price and range ──
+    sqrt_price_x96: int
+    cur_tick: int
+    liq: int                 // liquidity active at the current price
+    started: bool
+
+    // ── fee accounting ──
+    fee_proto_0: int         // protocol takes 1/n of the swap fee; 0 = off
+    fee_proto_1: int
+    fg0: int                 // fee growth per unit liquidity, Q128
+    fg1: int
+    proto_owed_0: int
+    proto_owed_1: int
+
+    // ── per-tick state (parallel maps: the VM has no struct type) ──
+    t_gross: map[int]int     // total liquidity referencing this tick
+    t_net: map[int]int       // liquidity added when crossing left-to-right
+    t_fg0_out: map[int]int   // fee growth on the far side of this tick
+    t_fg1_out: map[int]int
+    t_cum_out: map[int]int
+    t_spl_out: map[int]int
+    t_secs_out: map[int]int
+    t_init: map[int]bool
+    tick_bitmap: map[int]int // required by the bitmap include
+
+    // ── positions, keyed owner -> lower -> upper ──
+    p_liq: map[address]map[int]map[int]int
+    p_fg0: map[address]map[int]map[int]int
+    p_fg1: map[address]map[int]map[int]int
+    p_owed0: map[address]map[int]map[int]int
+    p_owed1: map[address]map[int]map[int]int
+
+    // ── price oracle ring buffer ──
+    o_ts: map[int]int
+    o_tcum: map[int]int
+    o_spl: map[int]int
+    o_init: map[int]bool
+    o_index: int
+    o_card: int
+    o_card_next: int
+  }
+
+  event Initialize(sqrt_price_x96: int, tick: int)
+  event Mint(owner: address, payer: address, tick_lower: int, tick_upper: int, amount: int, amount0: int, amount1: int)
+  event Burn(owner: address, recipient: address, tick_lower: int, tick_upper: int, amount: int, amount0: int, amount1: int)
+  event Collect(owner: address, recipient: address, tick_lower: int, tick_upper: int, amount0: int, amount1: int)
+  event Swap(sender: address, recipient: address, amount0: int, amount1: int, sqrt_price_x96: int, liquidity: int, tick: int)
+  event Flash(sender: address, recipient: address, amount0: int, amount1: int, paid0: int, paid1: int)
+  event Configured(token0: address, token1: address, fee_pips: int, spacing: int)
+  event SetFeeProtocol(old0: int, old1: int, new0: int, new1: int)
+  event CollectProtocol(recipient: address, amount0: int, amount1: int)
+  event ObservationCardinalityIncreased(old_next: int, new_next: int)
+
+  constructor() {
+    // `caller` in a constructor reached through deploy() is the deploying
+    // contract, which is how the factory claims the right to configure.
+    self.deployer = caller
+    self.factory = caller
+    self.configured = false
+    self.started = false
+    self.liq = 0
+    self.fg0 = 0
+    self.fg1 = 0
+    self.fee_proto_0 = 0
+    self.fee_proto_1 = 0
+    self.proto_owed_0 = 0
+    self.proto_owed_1 = 0
+    self.o_index = 0
+    self.o_card = 0
+    self.o_card_next = 0
+  }
+
+  // ===== begin lib/math.aml.inc (generated — edit contracts/lib/math.aml.inc) =====
+  // ---------------------------------------------------------------------------
+  // Integer helpers
+  //
+  // Two facts about this VM shape everything below:
+  //   * `int` is arbitrary precision, so a 256-bit-wide intermediate needs no
+  //     multi-limb emulation and mul_div is literally `a * b / d`.
+  //   * `/` and `%` truncate toward zero rather than flooring, so anything that
+  //     indexes on a signed tick has to spell floor semantics out. Bare `/` there
+  //     is an off-by-one for every price below 1.0.
+  // There are no bitwise operators, so bit work goes through pow/`/`/`%`.
+  // ---------------------------------------------------------------------------
+
+  view fn floor_mod(a: int, b: int): int {
+    require(b != 0, "mod by zero")
+    let m = a % b
+    if m < 0 {
+      m = m + b
+    }
+    return m
+  }
+
+  view fn floor_div(a: int, b: int): int {
+    require(b != 0, "div by zero")
+    let q = a / b
+    if a % b != 0 {
+      if a < 0 {
+        if b > 0 {
+          q = q - 1
+        }
+      }
+      if a > 0 {
+        if b < 0 {
+          q = q - 1
+        }
+      }
+    }
+    return q
+  }
+
+  view fn mul_div(a: int, b: int, d: int): int {
+    require(d != 0, "div by zero")
+    return a * b / d
+  }
+
+  view fn mul_div_up(a: int, b: int, d: int): int {
+    require(d != 0, "div by zero")
+    let p = a * b
+    let q = p / d
+    if p % d != 0 {
+      q = q + 1
+    }
+    return q
+  }
+
+  view fn div_up(a: int, b: int): int {
+    require(b != 0, "div by zero")
+    let q = a / b
+    if a % b != 0 {
+      q = q + 1
+    }
+    return q
+  }
+
+  // Index of the most significant set bit, by unrolled binary search. Stands in
+  // for the shift-and-compare scan the reference log2 routine uses.
+  view fn msb(x: int): int {
+    require(x > 0, "msb of zero")
+    let r = 0
+    let v = x
+    if v >= 340282366920938463463374607431768211456 {
+      v = v / 340282366920938463463374607431768211456
+      r = r + 128
+    }
+    if v >= 18446744073709551616 {
+      v = v / 18446744073709551616
+      r = r + 64
+    }
+    if v >= 4294967296 {
+      v = v / 4294967296
+      r = r + 32
+    }
+    if v >= 65536 {
+      v = v / 65536
+      r = r + 16
+    }
+    if v >= 256 {
+      v = v / 256
+      r = r + 8
+    }
+    if v >= 16 {
+      v = v / 16
+      r = r + 4
+    }
+    if v >= 4 {
+      v = v / 4
+      r = r + 2
+    }
+    if v >= 2 {
+      r = r + 1
+    }
+    return r
+  }
+
+  // Index of the least significant set bit. `x & -x` is unavailable, so this
+  // binary-searches on "are the low k bits all zero" via modulo.
+  view fn lsb(x: int): int {
+    require(x > 0, "lsb of zero")
+    let r = 0
+    let v = x
+    if v % 340282366920938463463374607431768211456 == 0 {
+      v = v / 340282366920938463463374607431768211456
+      r = r + 128
+    }
+    if v % 18446744073709551616 == 0 {
+      v = v / 18446744073709551616
+      r = r + 64
+    }
+    if v % 4294967296 == 0 {
+      v = v / 4294967296
+      r = r + 32
+    }
+    if v % 65536 == 0 {
+      v = v / 65536
+      r = r + 16
+    }
+    if v % 256 == 0 {
+      v = v / 256
+      r = r + 8
+    }
+    if v % 16 == 0 {
+      v = v / 16
+      r = r + 4
+    }
+    if v % 4 == 0 {
+      v = v / 4
+      r = r + 2
+    }
+    if v % 2 == 0 {
+      r = r + 1
+    }
+    return r
+  }
+
+  // 2^128 — the fixed-point denominator for every fee-growth accumulator.
+  // Written as a literal because `pow(2, 128)` re-derives it on every call and
+  // fee growth is touched on each tick crossing.
+  view fn q128(): int {
+    return 340282366920938463463374607431768211456
+  }
+
+  // The largest value a 128-bit liquidity figure can hold. Liquidity is
+  // arbitrary-precision here, so this is a policy cap rather than a hardware
+  // one: it keeps per-tick liquidity inside the range the price/amount math was
+  // validated over.
+  view fn liquidity_max(): int {
+    return 340282366920938463463374607431768211455
+  }
+  // ===== end lib/math.aml.inc =====
+
+  // ===== begin lib/tickmath.aml.inc (generated — edit contracts/lib/tickmath.aml.inc) =====
+  // ---------------------------------------------------------------------------
+  // Tick <-> sqrt-price conversion, Q64.96.
+  //
+  //   sqrt_price_x96 = sqrt(1.0001 ^ tick) * 2^96
+  //
+  // Ports the canonical multiply-and-shift ladder: each of the 20 stages folds in
+  // one bit of |tick|, with `>> 128` written as division by 2^128. Verified
+  // bit-exact against the reference implementation at 289 ticks spanning the whole
+  // usable range, including every power-of-two boundary and both extremes.
+  // ---------------------------------------------------------------------------
+
+  view fn min_tick(): int {
+    return -887272
+  }
+
+  view fn max_tick(): int {
+    return 887272
+  }
+
+  view fn min_sqrt_ratio(): int {
+    return 4295128739
+  }
+
+  view fn max_sqrt_ratio(): int {
+    return 1461446703485210103287273052203988822378723970342
+  }
+
+  // One stage of the ladder: (r * c) >> 128.
+  view fn ratio_stage(r: int, c: int): int {
+    return r * c / 340282366920938463463374607431768211456
+  }
+
+  view fn sqrt_ratio_at_tick(tick: int): int {
+    let at = abs(tick)
+    require(at <= 887272, "tick out of range")
+    let r = 340282366920938463463374607431768211456
+    if at % 2 == 1 {
+      r = 340265354078544963557816517032075149313
+    }
+    if at / 2 % 2 == 1 {
+      r = ratio_stage(r, 340248342086729790484326174814286782778)
+    }
+    if at / 4 % 2 == 1 {
+      r = ratio_stage(r, 340214320654664324051920982716015181260)
+    }
+    if at / 8 % 2 == 1 {
+      r = ratio_stage(r, 340146287995602323631171512101879684304)
+    }
+    if at / 16 % 2 == 1 {
+      r = ratio_stage(r, 340010263488231146823593991679159461444)
+    }
+    if at / 32 % 2 == 1 {
+      r = ratio_stage(r, 339738377640345403697157401104375502016)
+    }
+    if at / 64 % 2 == 1 {
+      r = ratio_stage(r, 339195258003219555707034227454543997025)
+    }
+    if at / 128 % 2 == 1 {
+      r = ratio_stage(r, 338111622100601834656805679988414885971)
+    }
+    if at / 256 % 2 == 1 {
+      r = ratio_stage(r, 335954724994790223023589805789778977700)
+    }
+    if at / 512 % 2 == 1 {
+      r = ratio_stage(r, 331682121138379247127172139078559817300)
+    }
+    if at / 1024 % 2 == 1 {
+      r = ratio_stage(r, 323299236684853023288211250268160618739)
+    }
+    if at / 2048 % 2 == 1 {
+      r = ratio_stage(r, 307163716377032989948697243942600083929)
+    }
+    if at / 4096 % 2 == 1 {
+      r = ratio_stage(r, 277268403626896220162999269216087595045)
+    }
+    if at / 8192 % 2 == 1 {
+      r = ratio_stage(r, 225923453940442621947126027127485391333)
+    }
+    if at / 16384 % 2 == 1 {
+      r = ratio_stage(r, 149997214084966997727330242082538205943)
+    }
+    if at / 32768 % 2 == 1 {
+      r = ratio_stage(r, 66119101136024775622716233608466517926)
+    }
+    if at / 65536 % 2 == 1 {
+      r = ratio_stage(r, 12847376061809297530290974190478138313)
+    }
+    if at / 131072 % 2 == 1 {
+      r = ratio_stage(r, 485053260817066172746253684029974020)
+    }
+    if at / 262144 % 2 == 1 {
+      r = ratio_stage(r, 691415978906521570653435304214168)
+    }
+    if at / 524288 % 2 == 1 {
+      r = ratio_stage(r, 1404880482679654955896180642)
+    }
+    if tick > 0 {
+      r = 115792089237316195423570985008687907853269984665640564039457584007913129639935 / r
+    }
+    let q = r / 4294967296
+    if r % 4294967296 != 0 {
+      q = q + 1
+    }
+    return q
+  }
+
+  // One refinement step of the binary log. Returns the updated mantissa; the bit
+  // it produced is read back out by log_step_bit so the caller can accumulate it
+  // without needing two return values.
+  view fn log_step_bit(r: int): int {
+    return r * r / 170141183460469231731687303715884105728 / 340282366920938463463374607431768211456
+  }
+
+  view fn log_step_next(r: int): int {
+    let sq = r * r / 170141183460469231731687303715884105728
+    return sq / pow(2, sq / 340282366920938463463374607431768211456)
+  }
+
+  // Inverse of sqrt_ratio_at_tick: the greatest tick whose sqrt ratio is <= the
+  // input. Computes log2 of the Q128 mantissa to 14 fractional bits, converts to
+  // a log base sqrt(1.0001), then resolves the one-tick ambiguity by re-deriving
+  // the candidate ratio.
+  //
+  // The two `>> 128` at the end are ARITHMETIC shifts on a signed value, so they
+  // must floor, not truncate — hence floor_div rather than `/`.
+  view fn tick_at_sqrt_ratio(sqrt_price_x96: int): int {
+    require(sqrt_price_x96 >= 4295128739, "sqrt price too low")
+    require(sqrt_price_x96 < 1461446703485210103287273052203988822378723970342, "sqrt price too high")
+    let ratio = sqrt_price_x96 * 4294967296
+    let m = msb(ratio)
+    let r = 0
+    if m >= 128 {
+      r = ratio / pow(2, m - 127)
+    } else {
+      r = ratio * pow(2, 127 - m)
+    }
+    let log_2 = (m - 128) * 18446744073709551616
+    log_2 = log_2 + log_step_bit(r) * 9223372036854775808
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 4611686018427387904
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 2305843009213693952
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 1152921504606846976
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 576460752303423488
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 288230376151711744
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 144115188075855872
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 72057594037927936
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 36028797018963968
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 18014398509481984
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 9007199254740992
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 4503599627370496
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 2251799813685248
+    r = log_step_next(r)
+    log_2 = log_2 + log_step_bit(r) * 1125899906842624
+    let log_root = log_2 * 255738958999603826347141
+    let tick_low = floor_div(log_root - 3402992956809132418596140100660247210, 340282366920938463463374607431768211456)
+    let tick_hi = floor_div(log_root + 291339464771989622907027621153398088495, 340282366920938463463374607431768211456)
+    if tick_low == tick_hi {
+      return tick_low
+    }
+    if sqrt_ratio_at_tick(tick_hi) <= sqrt_price_x96 {
+      return tick_hi
+    }
+    return tick_low
+  }
+  // ===== end lib/tickmath.aml.inc =====
+
+  // ===== begin lib/bitmap.aml.inc (generated — edit contracts/lib/bitmap.aml.inc) =====
+  // ---------------------------------------------------------------------------
+  // Tick index: a bitmap of initialized ticks.
+  //
+  // Requires the host contract to declare  tick_bitmap: map[int]int  where each
+  // entry is a 256-bit word covering 256 consecutive spaced ticks.
+  //
+  // With no bitwise operators, the three primitives are rebuilt arithmetically:
+  //   test bit b   ->  word / 2^b % 2 == 1
+  //   set  bit b   ->  word + 2^b
+  //   clear bit b  ->  word - 2^b
+  //   low mask     ->  word & (2^(b+1) - 1)  ==  word % 2^(b+1)
+  //   high mask    ->  word & ~(2^b - 1)     ==  word / 2^b * 2^b
+  // Word and bit indices use floor semantics so negative ticks land correctly.
+  // ---------------------------------------------------------------------------
+
+  view fn tick_word(compressed: int): int {
+    return floor_div(compressed, 256)
+  }
+
+  view fn tick_bit(compressed: int): int {
+    return floor_mod(compressed, 256)
+  }
+
+  view fn is_tick_initialized(tick: int, spacing: int): bool {
+    let c = floor_div(tick, spacing)
+    return self.tick_bitmap[tick_word(c)] / pow(2, tick_bit(c)) % 2 == 1
+  }
+
+  fn flip_tick(tick: int, spacing: int): bool {
+    require(floor_mod(tick, spacing) == 0, "tick not on spacing")
+    let c = floor_div(tick, spacing)
+    let w = tick_word(c)
+    let mask = pow(2, tick_bit(c))
+    let word = self.tick_bitmap[w]
+    if word / mask % 2 == 1 {
+      self.tick_bitmap[w] = word - mask
+    } else {
+      self.tick_bitmap[w] = word + mask
+    }
+    return true
+  }
+
+  // Nearest initialized tick in the same word, searching down (lte) or up.
+  // When the word holds nothing in range this returns the word boundary, which is
+  // how the swap loop makes progress across sparse regions. Callers detect that
+  // case with is_tick_initialized on the result — the boundary bit is provably
+  // clear whenever the masked word came back empty, so the two agree.
+  view fn next_tick_in_word(tick: int, spacing: int, lte: bool): int {
+    let c = floor_div(tick, spacing)
+    if lte {
+      let b = tick_bit(c)
+      let masked = self.tick_bitmap[tick_word(c)] % pow(2, b + 1)
+      if masked == 0 {
+        return (c - b) * spacing
+      }
+      return (c - (b - msb(masked))) * spacing
+    }
+    let c1 = c + 1
+    let b = tick_bit(c1)
+    let p = pow(2, b)
+    let masked = self.tick_bitmap[tick_word(c1)] / p * p
+    if masked == 0 {
+      return (c1 + (255 - b)) * spacing
+    }
+    return (c1 + (lsb(masked) - b)) * spacing
+  }
+  // ===== end lib/bitmap.aml.inc =====
+
+  // ===== begin lib/swapmath.aml.inc (generated — edit contracts/lib/swapmath.aml.inc) =====
+  // ---------------------------------------------------------------------------
+  // Swap and liquidity math, Q64.96.
+  //
+  // Rounding direction is the whole game here: every amount the pool RECEIVES
+  // rounds up and every amount it PAYS OUT rounds down, so truncation can only
+  // ever accrue to the pool and never to the trader. Getting one of these
+  // backwards leaks value out of the reserves one wei at a time.
+  //
+  // The reference implementation carries overflow branches that exist only to
+  // cope with 256-bit wraparound. Integers here are arbitrary precision, so those
+  // branches are unreachable and are omitted rather than left as dead weight.
+  // ---------------------------------------------------------------------------
+
+  view fn q96(): int {
+    return 79228162514264337593543950336
+  }
+
+  // token0 delta between two prices: liquidity / sqrt(lower) - liquidity / sqrt(upper)
+  view fn amount0_delta(sqrt_a: int, sqrt_b: int, liq: int, round_up: bool): int {
+    let lo = min(sqrt_a, sqrt_b)
+    let hi = max(sqrt_a, sqrt_b)
+    require(lo > 0, "sqrt price zero")
+    let num1 = liq * 79228162514264337593543950336
+    let num2 = hi - lo
+    if round_up {
+      return div_up(mul_div_up(num1, num2, hi), lo)
+    }
+    return mul_div(num1, num2, hi) / lo
+  }
+
+  // token1 delta between two prices: liquidity * (sqrt(upper) - sqrt(lower))
+  view fn amount1_delta(sqrt_a: int, sqrt_b: int, liq: int, round_up: bool): int {
+    let lo = min(sqrt_a, sqrt_b)
+    let hi = max(sqrt_a, sqrt_b)
+    if round_up {
+      return mul_div_up(liq, hi - lo, 79228162514264337593543950336)
+    }
+    return mul_div(liq, hi - lo, 79228162514264337593543950336)
+  }
+
+  // Signed variants, used when crossing a tick applies liquidity_net.
+  view fn amount0_delta_signed(sqrt_a: int, sqrt_b: int, liq: int): int {
+    if liq < 0 {
+      return 0 - amount0_delta(sqrt_a, sqrt_b, 0 - liq, false)
+    }
+    return amount0_delta(sqrt_a, sqrt_b, liq, true)
+  }
+
+  view fn amount1_delta_signed(sqrt_a: int, sqrt_b: int, liq: int): int {
+    if liq < 0 {
+      return 0 - amount1_delta(sqrt_a, sqrt_b, 0 - liq, false)
+    }
+    return amount1_delta(sqrt_a, sqrt_b, liq, true)
+  }
+
+  view fn next_sqrt_from_amount0_up(sqrt_p: int, liq: int, amount: int, add: bool): int {
+    if amount == 0 {
+      return sqrt_p
+    }
+    let num1 = liq * 79228162514264337593543950336
+    if add {
+      return mul_div_up(num1, sqrt_p, num1 + amount * sqrt_p)
+    }
+    let product = amount * sqrt_p
+    require(num1 > product, "amount0 exceeds range")
+    return mul_div_up(num1, sqrt_p, num1 - product)
+  }
+
+  view fn next_sqrt_from_amount1_down(sqrt_p: int, liq: int, amount: int, add: bool): int {
+    if add {
+      return sqrt_p + mul_div(amount, 79228162514264337593543950336, liq)
+    }
+    let q = mul_div_up(amount, 79228162514264337593543950336, liq)
+    require(sqrt_p > q, "amount1 exceeds range")
+    return sqrt_p - q
+  }
+
+  view fn next_sqrt_from_input(sqrt_p: int, liq: int, amount_in: int, zero_for_one: bool): int {
+    require(sqrt_p > 0, "zero price")
+    require(liq > 0, "zero liquidity")
+    if zero_for_one {
+      return next_sqrt_from_amount0_up(sqrt_p, liq, amount_in, true)
+    }
+    return next_sqrt_from_amount1_down(sqrt_p, liq, amount_in, true)
+  }
+
+  view fn next_sqrt_from_output(sqrt_p: int, liq: int, amount_out: int, zero_for_one: bool): int {
+    require(sqrt_p > 0, "zero price")
+    require(liq > 0, "zero liquidity")
+    if zero_for_one {
+      return next_sqrt_from_amount1_down(sqrt_p, liq, amount_out, false)
+    }
+    return next_sqrt_from_amount0_up(sqrt_p, liq, amount_out, false)
+  }
+
+  // One step of a swap, split across four pure functions because a single
+  // function cannot hand back four values and a state-scratch version would be
+  // unreachable from a read-only quote. The caller computes the price once and
+  // derives the amounts from it, so nothing is recomputed twice.
+  //
+  // `remaining` >= 0 means exact-input; < 0 means exact-output.
+  view fn step_next_sqrt(sqrt_cur: int, sqrt_tgt: int, liq: int, remaining: int, fee_pips: int): int {
+    let z4o = sqrt_cur >= sqrt_tgt
+    if remaining >= 0 {
+      let less_fee = mul_div(remaining, 1000000 - fee_pips, 1000000)
+      let amt_in = 0
+      if z4o {
+        amt_in = amount0_delta(sqrt_tgt, sqrt_cur, liq, true)
+      } else {
+        amt_in = amount1_delta(sqrt_cur, sqrt_tgt, liq, true)
+      }
+      if less_fee >= amt_in {
+        return sqrt_tgt
+      }
+      return next_sqrt_from_input(sqrt_cur, liq, less_fee, z4o)
+    }
+    let amt_out = 0
+    if z4o {
+      amt_out = amount1_delta(sqrt_tgt, sqrt_cur, liq, false)
+    } else {
+      amt_out = amount0_delta(sqrt_cur, sqrt_tgt, liq, false)
+    }
+    if 0 - remaining >= amt_out {
+      return sqrt_tgt
+    }
+    return next_sqrt_from_output(sqrt_cur, liq, 0 - remaining, z4o)
+  }
+
+  view fn step_amount_in(sqrt_cur: int, sqrt_next: int, liq: int, z4o: bool): int {
+    if z4o {
+      return amount0_delta(sqrt_next, sqrt_cur, liq, true)
+    }
+    return amount1_delta(sqrt_cur, sqrt_next, liq, true)
+  }
+
+  view fn step_amount_out(sqrt_cur: int, sqrt_next: int, liq: int, z4o: bool): int {
+    if z4o {
+      return amount1_delta(sqrt_next, sqrt_cur, liq, false)
+    }
+    return amount0_delta(sqrt_cur, sqrt_next, liq, false)
+  }
+
+  // When exact-input stops short of the target the entire unused remainder is the
+  // fee, which is how the reference avoids leaving dust behind. Otherwise the fee
+  // is charged on top of the amount actually swapped in.
+  view fn step_fee(remaining: int, amt_in: int, sqrt_next: int, sqrt_tgt: int, fee_pips: int): int {
+    if remaining >= 0 {
+      if sqrt_next != sqrt_tgt {
+        return remaining - amt_in
+      }
+    }
+    return mul_div_up(amt_in, fee_pips, 1000000 - fee_pips)
+  }
+
+  // ── Liquidity from token amounts ──────────────────────────────────────
+  //
+  // The inverse of the amount deltas above: given how much of each token a
+  // provider is willing to deposit, how much liquidity does that buy across the
+  // range. Rounding is downward throughout, so a deposit never claims more
+  // liquidity than it actually funds.
+
+  view fn liquidity_for_amount0(sqrt_a: int, sqrt_b: int, amount0: int): int {
+    let lo = min(sqrt_a, sqrt_b)
+    let hi = max(sqrt_a, sqrt_b)
+    require(hi > lo, "empty range")
+    return amount0 * (lo * hi / q96()) / (hi - lo)
+  }
+
+  view fn liquidity_for_amount1(sqrt_a: int, sqrt_b: int, amount1: int): int {
+    let lo = min(sqrt_a, sqrt_b)
+    let hi = max(sqrt_a, sqrt_b)
+    require(hi > lo, "empty range")
+    return amount1 * q96() / (hi - lo)
+  }
+
+  // Below the range only token0 is needed, above it only token1, and inside it
+  // both — where the binding side is whichever funds less liquidity.
+  view fn liquidity_for_amounts_at(sqrt_p: int, sqrt_a: int, sqrt_b: int, amount0: int, amount1: int): int {
+    let lo = min(sqrt_a, sqrt_b)
+    let hi = max(sqrt_a, sqrt_b)
+    if sqrt_p <= lo {
+      return liquidity_for_amount0(lo, hi, amount0)
+    }
+    if sqrt_p < hi {
+      return min(liquidity_for_amount0(sqrt_p, hi, amount0), liquidity_for_amount1(lo, sqrt_p, amount1))
+    }
+    return liquidity_for_amount1(lo, hi, amount1)
+  }
+  // ===== end lib/swapmath.aml.inc =====
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Configuration
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Spreading the maximum liquidity evenly over every usable tick bounds the
+  // per-tick figure to the range the price and amount math was validated over.
+  // Truncation toward zero is intentional here and matches the tick alignment
+  // used everywhere else for range ends.
+  view fn max_liquidity_for_spacing(s: int): int {
+    let lo = min_tick() / s * s
+    let hi = max_tick() / s * s
+    let num = (hi - lo) / s + 1
+    return liquidity_max() / num
+  }
+
+  fn configure(t0: address, t1: address, fee: int, s: int): bool {
+    require(!self.configured, "already configured")
+    require(caller == self.deployer, "not deployer")
+    assert_address(t0)
+    assert_address(t1)
+    require(t0 != t1, "identical tokens")
+    require(fee > 0 && fee < 1000000, "invalid fee")
+    require(s > 0 && s <= 16384, "invalid tick spacing")
+    self.token0 = t0
+    self.token1 = t1
+    self.fee_pips = fee
+    self.spacing = s
+    self.max_liq_per_tick = max_liquidity_for_spacing(s)
+    self.configured = true
+    emit Configured(t0, t1, fee, s)
+    return true
+  }
+
+  // Sets the starting price. Callable once, by anyone: the factory does this in
+  // the same transaction as create_pool so no third party can front-run it.
+  fn initialize(sqrt_price: int): bool {
+    require(self.configured, "not configured")
+    require(!self.started, "already initialized")
+    require(sqrt_price >= min_sqrt_ratio(), "price too low")
+    require(sqrt_price < max_sqrt_ratio(), "price too high")
+    let t = tick_at_sqrt_ratio(sqrt_price)
+    self.sqrt_price_x96 = sqrt_price
+    self.cur_tick = t
+    self.o_ts[0] = epoch
+    self.o_tcum[0] = 0
+    self.o_spl[0] = 0
+    self.o_init[0] = true
+    self.o_index = 0
+    self.o_card = 1
+    self.o_card_next = 1
+    self.started = true
+    emit Initialize(sqrt_price, t)
+    return true
+  }
+
+  view fn check_ticks(lower: int, upper: int): bool {
+    require(lower < upper, "lower tick not below upper")
+    require(lower >= min_tick(), "lower tick out of range")
+    require(upper <= max_tick(), "upper tick out of range")
+    require(floor_mod(lower, self.spacing) == 0, "lower tick off spacing")
+    require(floor_mod(upper, self.spacing) == 0, "upper tick off spacing")
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Fee growth inside a range
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // Each tick records the fee growth accumulated on the far side of it from
+  // the current price. Subtracting both sides from the global total leaves the
+  // growth that happened inside the range. The absolute result is only
+  // meaningful as a difference against an earlier snapshot — a freshly
+  // initialized tick seeds its outside value from the global total, which
+  // attributes all prior growth to one side. With exact signed integers the
+  // value can therefore be negative; only the delta between two snapshots is
+  // used, and that is always correct.
+
+  view fn fee_growth_inside_0(lower: int, upper: int): int {
+    let g = self.fg0
+    let below = self.t_fg0_out[lower]
+    if self.cur_tick < lower {
+      below = g - below
+    }
+    let above = self.t_fg0_out[upper]
+    if self.cur_tick >= upper {
+      above = g - above
+    }
+    return g - below - above
+  }
+
+  view fn fee_growth_inside_1(lower: int, upper: int): int {
+    let g = self.fg1
+    let below = self.t_fg1_out[lower]
+    if self.cur_tick < lower {
+      below = g - below
+    }
+    let above = self.t_fg1_out[upper]
+    if self.cur_tick >= upper {
+      above = g - above
+    }
+    return g - below - above
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Tick and position bookkeeping
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Applies a liquidity delta to one tick. Returns true when the tick changed
+  // between referenced and unreferenced, which is when the caller must flip its
+  // bitmap bit. `upper` selects the sign of the net delta.
+  fn tick_apply(t: int, delta: int, upper: bool): bool {
+    let gross_before = self.t_gross[t]
+    let gross_after = gross_before + delta
+    require(gross_after >= 0, "tick liquidity underflow")
+    require(gross_after <= self.max_liq_per_tick, "tick liquidity cap exceeded")
+    let flipped = false
+    if gross_before == 0 && gross_after > 0 {
+      // Seed the outside accumulators. Both branches are written explicitly so
+      // a tick that is re-referenced later never inherits stale values from a
+      // previous life.
+      if t <= self.cur_tick {
+        self.t_fg0_out[t] = self.fg0
+        self.t_fg1_out[t] = self.fg1
+        self.t_cum_out[t] = self.o_tcum[self.o_index]
+        self.t_spl_out[t] = self.o_spl[self.o_index]
+        self.t_secs_out[t] = epoch
+      } else {
+        self.t_fg0_out[t] = 0
+        self.t_fg1_out[t] = 0
+        self.t_cum_out[t] = 0
+        self.t_spl_out[t] = 0
+        self.t_secs_out[t] = 0
+      }
+      self.t_init[t] = true
+      flipped = true
+    }
+    if gross_before > 0 && gross_after == 0 {
+      self.t_init[t] = false
+      flipped = true
+    }
+    self.t_gross[t] = gross_after
+    if upper {
+      self.t_net[t] = self.t_net[t] - delta
+    } else {
+      self.t_net[t] = self.t_net[t] + delta
+    }
+    return flipped
+  }
+
+  // Credits earned fees to a position and applies a liquidity delta. Must run
+  // after both range ticks have been seeded, since it reads their outside
+  // accumulators.
+  fn pos_apply(owner: address, lower: int, upper: int, delta: int): bool {
+    let liq_before = self.p_liq[owner][lower][upper]
+    let liq_after = liq_before + delta
+    require(liq_after >= 0, "insufficient position liquidity")
+    let in0 = fee_growth_inside_0(lower, upper)
+    let in1 = fee_growth_inside_1(lower, upper)
+    if liq_before > 0 {
+      let d0 = in0 - self.p_fg0[owner][lower][upper]
+      let d1 = in1 - self.p_fg1[owner][lower][upper]
+      // Growth inside a range only ever increases between two snapshots, so a
+      // negative delta would mean corrupt state. Clamping keeps a position
+      // withdrawable instead of bricking it on an impossible reading.
+      if d0 > 0 {
+        self.p_owed0[owner][lower][upper] = self.p_owed0[owner][lower][upper] + d0 * liq_before / q128()
+      }
+      if d1 > 0 {
+        self.p_owed1[owner][lower][upper] = self.p_owed1[owner][lower][upper] + d1 * liq_before / q128()
+      }
+    }
+    self.p_fg0[owner][lower][upper] = in0
+    self.p_fg1[owner][lower][upper] = in1
+    self.p_liq[owner][lower][upper] = liq_after
+    return true
+  }
+
+  // Token0 owed for a liquidity delta at the current price. Positive delta
+  // means the pool receives, so it rounds up; a withdrawal rounds down.
+  view fn amount0_for_liquidity(lower: int, upper: int, delta: int): int {
+    if delta == 0 {
+      return 0
+    }
+    if self.cur_tick < lower {
+      return amount0_delta_signed(sqrt_ratio_at_tick(lower), sqrt_ratio_at_tick(upper), delta)
+    }
+    if self.cur_tick < upper {
+      return amount0_delta_signed(self.sqrt_price_x96, sqrt_ratio_at_tick(upper), delta)
+    }
+    return 0
+  }
+
+  view fn amount1_for_liquidity(lower: int, upper: int, delta: int): int {
+    if delta == 0 {
+      return 0
+    }
+    if self.cur_tick < lower {
+      return 0
+    }
+    if self.cur_tick < upper {
+      return amount1_delta_signed(sqrt_ratio_at_tick(lower), self.sqrt_price_x96, delta)
+    }
+    return amount1_delta_signed(sqrt_ratio_at_tick(lower), sqrt_ratio_at_tick(upper), delta)
+  }
+
+  // How much liquidity a pair of deposit amounts buys over [lower, upper) at
+  // the pool's current price. A manager contract sizes a position with this,
+  // then asks for the exact token amounts back via the two views above.
+  view fn liquidity_for_amounts(lower: int, upper: int, amount0: int, amount1: int): int {
+    return liquidity_for_amounts_at(self.sqrt_price_x96, sqrt_ratio_at_tick(lower), sqrt_ratio_at_tick(upper), amount0, amount1)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Liquidity provision
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Adds `amount` liquidity over [lower, upper) and charges the caller. The
+  // position is credited to `recipient`, so a manager contract can hold
+  // positions on behalf of its own users. Slippage is enforced here rather
+  // than by the caller: the maximums are checked atomically with the state
+  // change, so there is no window where a price move can overcharge.
+  nonreentrant fn mint(recipient: address, lower: int, upper: int, amount: int, amount0_max: int, amount1_max: int, deadline: int): bool {
+    require(self.started, "not initialized")
+    require(amount > 0, "zero liquidity")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+    require(check_ticks(lower, upper), "invalid tick range")
+
+    let a0 = amount0_for_liquidity(lower, upper, amount)
+    let a1 = amount1_for_liquidity(lower, upper, amount)
+    require(a0 <= amount0_max, "token0 amount above maximum")
+    require(a1 <= amount1_max, "token1 amount above maximum")
+
+    if tick_apply(lower, amount, false) {
+      require(flip_tick(lower, self.spacing), "flip lower failed")
+    }
+    if tick_apply(upper, amount, true) {
+      require(flip_tick(upper, self.spacing), "flip upper failed")
+    }
+    require(pos_apply(recipient, lower, upper, amount), "position update failed")
+    if self.cur_tick >= lower && self.cur_tick < upper {
+      self.liq = self.liq + amount
+    }
+
+    if a0 > 0 {
+      require(call(self.token0, "pull", [caller, self_addr, a0]), "token0 payment failed")
+    }
+    if a1 > 0 {
+      require(call(self.token1, "pull", [caller, self_addr, a1]), "token1 payment failed")
+    }
+    emit Mint(recipient, caller, lower, upper, amount, a0, a1)
+    return true
+  }
+
+  // Removes liquidity from the caller's own position and sends the principal
+  // straight to `recipient`. Fees earned are realized into the position's owed
+  // balance and stay there until collected, which keeps principal and fees
+  // separable for a manager that aggregates several users into one range.
+  nonreentrant fn burn(recipient: address, lower: int, upper: int, amount: int, amount0_min: int, amount1_min: int, deadline: int): bool {
+    require(self.started, "not initialized")
+    require(amount > 0, "zero liquidity")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+    require(check_ticks(lower, upper), "invalid tick range")
+    require(self.p_liq[caller][lower][upper] >= amount, "insufficient position liquidity")
+
+    let out0 = 0 - amount0_for_liquidity(lower, upper, 0 - amount)
+    let out1 = 0 - amount1_for_liquidity(lower, upper, 0 - amount)
+    require(out0 >= amount0_min, "token0 amount below minimum")
+    require(out1 >= amount1_min, "token1 amount below minimum")
+
+    if tick_apply(lower, 0 - amount, false) {
+      require(flip_tick(lower, self.spacing), "flip lower failed")
+    }
+    if tick_apply(upper, 0 - amount, true) {
+      require(flip_tick(upper, self.spacing), "flip upper failed")
+    }
+    require(pos_apply(caller, lower, upper, 0 - amount), "position update failed")
+    if self.cur_tick >= lower && self.cur_tick < upper {
+      self.liq = self.liq - amount
+    }
+
+    if out0 > 0 {
+      require(call(self.token0, "transfer", [recipient, out0]), "token0 payout failed")
+    }
+    if out1 > 0 {
+      require(call(self.token1, "transfer", [recipient, out1]), "token1 payout failed")
+    }
+    emit Burn(caller, recipient, lower, upper, amount, out0, out1)
+    return true
+  }
+
+  // Realizes fees earned so far into the caller's owed balance without moving
+  // any liquidity. A manager calls this before splitting fees between the
+  // users sharing one range.
+  nonreentrant fn poke(lower: int, upper: int): bool {
+    require(self.started, "not initialized")
+    require(check_ticks(lower, upper), "invalid tick range")
+    require(self.p_liq[caller][lower][upper] > 0, "no position")
+    require(pos_apply(caller, lower, upper, 0), "position update failed")
+    return true
+  }
+
+  // Withdraws up to the requested amounts from the caller's owed balance.
+  nonreentrant fn collect(recipient: address, lower: int, upper: int, amount0_req: int, amount1_req: int): bool {
+    require(self.started, "not initialized")
+    assert_address(recipient)
+    require(amount0_req >= 0 && amount1_req >= 0, "negative amount")
+    let a0 = min(amount0_req, self.p_owed0[caller][lower][upper])
+    let a1 = min(amount1_req, self.p_owed1[caller][lower][upper])
+    if a0 > 0 {
+      self.p_owed0[caller][lower][upper] = self.p_owed0[caller][lower][upper] - a0
+      require(call(self.token0, "transfer", [recipient, a0]), "token0 payout failed")
+    }
+    if a1 > 0 {
+      self.p_owed1[caller][lower][upper] = self.p_owed1[caller][lower][upper] - a1
+      require(call(self.token1, "transfer", [recipient, a1]), "token1 payout failed")
+    }
+    emit Collect(caller, recipient, lower, upper, a0, a1)
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Oracle
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // Time is measured in epochs, not seconds — an epoch is roughly 12.9s on
+  // this chain, and every window below is therefore an epoch count.
+
+  fn obs_write(t: int, l: int): bool {
+    let idx = self.o_index
+    let last_ts = self.o_ts[idx]
+    if last_ts == epoch {
+      return true
+    }
+    let card = self.o_card
+    if self.o_card_next > card && idx == card - 1 {
+      card = self.o_card_next
+    }
+    let next = floor_mod(idx + 1, card)
+    let d = epoch - last_ts
+    let denom = l
+    if denom <= 0 {
+      denom = 1
+    }
+    self.o_ts[next] = epoch
+    self.o_tcum[next] = self.o_tcum[idx] + t * d
+    self.o_spl[next] = self.o_spl[idx] + d * q128() / denom
+    self.o_init[next] = true
+    self.o_index = next
+    self.o_card = card
+    return true
+  }
+
+  fn increase_observation_cardinality_next(next: int): bool {
+    require(self.started, "not initialized")
+    require(next > self.o_card_next, "cardinality not increasing")
+    require(next <= 512, "cardinality above cap")
+    let old = self.o_card_next
+    // Pre-seed the timestamps so later writes never pay for first touch and
+    // the ring never reports an uninitialized slot as valid.
+    let i = old
+    while i < next {
+      if !self.o_init[i] {
+        self.o_ts[i] = 1
+      }
+      i = i + 1
+    }
+    self.o_card_next = next
+    emit ObservationCardinalityIncreased(old, next)
+    return true
+  }
+
+  // Tick cumulative at `epochs_ago` epochs before now, interpolated between
+  // the two observations bracketing that instant. The scan is linear rather
+  // than binary: cardinality is capped at 512, which is far below the effort
+  // ceiling for a read, and a linear walk is much easier to verify.
+  view fn tick_cumulative_at(epochs_ago: int): int {
+    require(self.started, "not initialized")
+    require(epochs_ago >= 0, "negative window")
+    let card = self.o_card
+    let newest = self.o_index
+    let target = epoch - epochs_ago
+    let newest_ts = self.o_ts[newest]
+    if newest_ts <= target {
+      // No observation that recent; extend the newest one at the current tick.
+      return self.o_tcum[newest] + self.cur_tick * (target - newest_ts)
+    }
+    let i = 0
+    let at = newest
+    let before = newest
+    let found = false
+    while i < card && !found {
+      let j = floor_mod(newest - i, card)
+      if self.o_init[j] {
+        if self.o_ts[j] <= target {
+          before = j
+          found = true
+        } else {
+          at = j
+        }
+      }
+      i = i + 1
+    }
+    require(found, "window predates oldest observation")
+    let t0 = self.o_ts[before]
+    let t1 = self.o_ts[at]
+    if t1 == t0 {
+      return self.o_tcum[before]
+    }
+    return self.o_tcum[before] + (self.o_tcum[at] - self.o_tcum[before]) * (target - t0) / (t1 - t0)
+  }
+
+  // Time-weighted average tick over the last `epochs_ago` epochs. This is the
+  // manipulation-resistant price reading: moving it requires holding the pool
+  // away from the true price for the whole window, not just one transaction.
+  view fn mean_tick(epochs_ago: int): int {
+    require(epochs_ago > 0, "zero window")
+    return (tick_cumulative_at(0) - tick_cumulative_at(epochs_ago)) / epochs_ago
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Swap
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Mirrors a tick's outside accumulators as the price crosses it and returns
+  // the signed liquidity delta to apply. Both global fee growths are passed in
+  // because the one being accumulated is still a local at this point.
+  fn cross_tick(t: int, zero_for_one: bool, g0: int, g1: int): int {
+    self.t_fg0_out[t] = g0 - self.t_fg0_out[t]
+    self.t_fg1_out[t] = g1 - self.t_fg1_out[t]
+    self.t_cum_out[t] = self.o_tcum[self.o_index] - self.t_cum_out[t]
+    self.t_spl_out[t] = self.o_spl[self.o_index] - self.t_spl_out[t]
+    self.t_secs_out[t] = epoch - self.t_secs_out[t]
+    if zero_for_one {
+      return 0 - self.t_net[t]
+    }
+    return self.t_net[t]
+  }
+
+  // `amount` positive means exact input, negative means exact output.
+  // `sqrt_limit` bounds how far the price may move. `amount_limit` is the
+  // minimum output for an exact-input swap, or the maximum input for an
+  // exact-output swap — checked here so slippage protection is atomic with the
+  // trade. Tokens move via the token contract's own transfer/pull, so there is
+  // no callback into the trader.
+  nonreentrant fn swap(recipient: address, dir: int, amount: int, sqrt_limit: int, amount_limit: int, deadline: int): bool {
+    require(self.started, "not initialized")
+    require(amount != 0, "zero amount")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+    let zero_for_one = dir != 0
+
+    let sqrt_cur = self.sqrt_price_x96
+    let tick_cur = self.cur_tick
+    if zero_for_one {
+      require(sqrt_limit < sqrt_cur && sqrt_limit > min_sqrt_ratio(), "price limit out of range")
+    } else {
+      require(sqrt_limit > sqrt_cur && sqrt_limit < max_sqrt_ratio(), "price limit out of range")
+    }
+
+    // The oracle entry must describe the state before this swap moves it.
+    require(obs_write(tick_cur, self.liq), "observation write failed")
+
+    let exact_in = amount > 0
+    let remaining = amount
+    let calculated = 0
+    let liquidity = self.liq
+    let g0 = self.fg0
+    let g1 = self.fg1
+    let proto_den = self.fee_proto_1
+    if zero_for_one {
+      proto_den = self.fee_proto_0
+    }
+    let proto_acc = 0
+
+    while remaining != 0 && sqrt_cur != sqrt_limit {
+      let step_start = sqrt_cur
+      let tick_next = next_tick_in_word(tick_cur, self.spacing, zero_for_one)
+      if tick_next < min_tick() {
+        tick_next = min_tick()
+      }
+      if tick_next > max_tick() {
+        tick_next = max_tick()
+      }
+      let sqrt_at_next = sqrt_ratio_at_tick(tick_next)
+      let target = sqrt_at_next
+      if zero_for_one {
+        if target < sqrt_limit {
+          target = sqrt_limit
+        }
+      } else {
+        if target > sqrt_limit {
+          target = sqrt_limit
+        }
+      }
+
+      let sqrt_new = step_next_sqrt(step_start, target, liquidity, remaining, self.fee_pips)
+      let amt_in = step_amount_in(step_start, sqrt_new, liquidity, zero_for_one)
+      let amt_out = step_amount_out(step_start, sqrt_new, liquidity, zero_for_one)
+      let fee_amt = step_fee(remaining, amt_in, sqrt_new, target, self.fee_pips)
+
+      if exact_in {
+        remaining = remaining - amt_in - fee_amt
+        calculated = calculated + amt_out
+      } else {
+        remaining = remaining + amt_out
+        calculated = calculated + amt_in + fee_amt
+      }
+
+      if proto_den > 0 {
+        let cut = fee_amt / proto_den
+        fee_amt = fee_amt - cut
+        proto_acc = proto_acc + cut
+      }
+      if liquidity > 0 {
+        if zero_for_one {
+          g0 = g0 + fee_amt * q128() / liquidity
+        } else {
+          g1 = g1 + fee_amt * q128() / liquidity
+        }
+      }
+
+      sqrt_cur = sqrt_new
+      if sqrt_new == sqrt_at_next {
+        if is_tick_initialized(tick_next, self.spacing) {
+          liquidity = liquidity + cross_tick(tick_next, zero_for_one, g0, g1)
+          require(liquidity >= 0, "liquidity underflow on cross")
+        }
+        if zero_for_one {
+          tick_cur = tick_next - 1
+        } else {
+          tick_cur = tick_next
+        }
+      } else {
+        if sqrt_new != step_start {
+          tick_cur = tick_at_sqrt_ratio(sqrt_new)
+        }
+      }
+    }
+
+    let paid = amount - remaining
+    let received = calculated
+    if !exact_in {
+      paid = calculated
+      received = remaining - amount
+      require(remaining == 0, "exact output not fully filled")
+      require(paid <= amount_limit, "input above maximum")
+    } else {
+      require(received >= amount_limit, "output below minimum")
+    }
+    require(paid > 0 && received > 0, "swap produced nothing")
+
+    self.sqrt_price_x96 = sqrt_cur
+    self.cur_tick = tick_cur
+    self.liq = liquidity
+    self.fg0 = g0
+    self.fg1 = g1
+    if proto_acc > 0 {
+      if zero_for_one {
+        self.proto_owed_0 = self.proto_owed_0 + proto_acc
+      } else {
+        self.proto_owed_1 = self.proto_owed_1 + proto_acc
+      }
+    }
+
+    if zero_for_one {
+      require(call(self.token0, "pull", [caller, self_addr, paid]), "input payment failed")
+      require(call(self.token1, "transfer", [recipient, received]), "output payout failed")
+      emit Swap(caller, recipient, paid, 0 - received, sqrt_cur, liquidity, tick_cur)
+    } else {
+      require(call(self.token1, "pull", [caller, self_addr, paid]), "input payment failed")
+      require(call(self.token0, "transfer", [recipient, received]), "output payout failed")
+      emit Swap(caller, recipient, 0 - received, paid, sqrt_cur, liquidity, tick_cur)
+    }
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Quoting
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // The same walk as swap, with no state written. The protocol's share of a fee
+  // is carved out of the providers' share and never changes what the trader
+  // pays, so quoting can ignore it entirely. A limit of 0 means "as far as the
+  // curve allows".
+
+  // The far edge of the curve in the given direction, for a caller that wants
+  // no price bound of its own.
+  view fn default_price_limit(dir: int): int {
+    if dir != 0 {
+      return min_sqrt_ratio() + 1
+    }
+    return max_sqrt_ratio() - 1
+  }
+
+  // Positive `amount` is exact input and returns the output received; negative
+  // is exact output and returns the input required. Returns 0 when the trade
+  // cannot be filled within the limit.
+  view fn quote(dir: int, amount: int, sqrt_limit: int): int {
+    require(self.started, "not initialized")
+    require(amount != 0, "zero amount")
+    let zero_for_one = dir != 0
+    let lim = sqrt_limit
+    if lim == 0 {
+      lim = default_price_limit(dir)
+    }
+    let sqrt_cur = self.sqrt_price_x96
+    let tick_cur = self.cur_tick
+    if zero_for_one {
+      require(lim < sqrt_cur, "price limit out of range")
+    } else {
+      require(lim > sqrt_cur, "price limit out of range")
+    }
+    let exact_in = amount > 0
+    let remaining = amount
+    let calculated = 0
+    let liquidity = self.liq
+
+    while remaining != 0 && sqrt_cur != lim {
+      let step_start = sqrt_cur
+      let tick_next = next_tick_in_word(tick_cur, self.spacing, zero_for_one)
+      if tick_next < min_tick() {
+        tick_next = min_tick()
+      }
+      if tick_next > max_tick() {
+        tick_next = max_tick()
+      }
+      let sqrt_at_next = sqrt_ratio_at_tick(tick_next)
+      let target = sqrt_at_next
+      if zero_for_one {
+        if target < lim {
+          target = lim
+        }
+      } else {
+        if target > lim {
+          target = lim
+        }
+      }
+      let sqrt_new = step_next_sqrt(step_start, target, liquidity, remaining, self.fee_pips)
+      let amt_in = step_amount_in(step_start, sqrt_new, liquidity, zero_for_one)
+      let amt_out = step_amount_out(step_start, sqrt_new, liquidity, zero_for_one)
+      let fee_amt = step_fee(remaining, amt_in, sqrt_new, target, self.fee_pips)
+      if exact_in {
+        remaining = remaining - amt_in - fee_amt
+        calculated = calculated + amt_out
+      } else {
+        remaining = remaining + amt_out
+        calculated = calculated + amt_in + fee_amt
+      }
+      sqrt_cur = sqrt_new
+      if sqrt_new == sqrt_at_next {
+        if is_tick_initialized(tick_next, self.spacing) {
+          if zero_for_one {
+            liquidity = liquidity - self.t_net[tick_next]
+          } else {
+            liquidity = liquidity + self.t_net[tick_next]
+          }
+          if liquidity < 0 {
+            return 0
+          }
+        }
+        if zero_for_one {
+          tick_cur = tick_next - 1
+        } else {
+          tick_cur = tick_next
+        }
+      } else {
+        if sqrt_new != step_start {
+          tick_cur = tick_at_sqrt_ratio(sqrt_new)
+        }
+      }
+    }
+    if !exact_in && remaining != 0 {
+      return 0
+    }
+    return calculated
+  }
+
+  // The price the pool would be left at. An interface derives price impact from
+  // this rather than from the ratio of amounts, which understates it on a trade
+  // that crosses several ranges.
+  view fn quote_price_after(dir: int, amount: int, sqrt_limit: int): int {
+    require(self.started, "not initialized")
+    require(amount != 0, "zero amount")
+    let zero_for_one = dir != 0
+    let lim = sqrt_limit
+    if lim == 0 {
+      lim = default_price_limit(dir)
+    }
+    let sqrt_cur = self.sqrt_price_x96
+    let tick_cur = self.cur_tick
+    let remaining = amount
+    let liquidity = self.liq
+    let exact_in = amount > 0
+
+    while remaining != 0 && sqrt_cur != lim {
+      let step_start = sqrt_cur
+      let tick_next = next_tick_in_word(tick_cur, self.spacing, zero_for_one)
+      if tick_next < min_tick() {
+        tick_next = min_tick()
+      }
+      if tick_next > max_tick() {
+        tick_next = max_tick()
+      }
+      let sqrt_at_next = sqrt_ratio_at_tick(tick_next)
+      let target = sqrt_at_next
+      if zero_for_one {
+        if target < lim {
+          target = lim
+        }
+      } else {
+        if target > lim {
+          target = lim
+        }
+      }
+      let sqrt_new = step_next_sqrt(step_start, target, liquidity, remaining, self.fee_pips)
+      let amt_in = step_amount_in(step_start, sqrt_new, liquidity, zero_for_one)
+      let amt_out = step_amount_out(step_start, sqrt_new, liquidity, zero_for_one)
+      let fee_amt = step_fee(remaining, amt_in, sqrt_new, target, self.fee_pips)
+      if exact_in {
+        remaining = remaining - amt_in - fee_amt
+      } else {
+        remaining = remaining + amt_out
+      }
+      sqrt_cur = sqrt_new
+      if sqrt_new == sqrt_at_next {
+        if is_tick_initialized(tick_next, self.spacing) {
+          if zero_for_one {
+            liquidity = liquidity - self.t_net[tick_next]
+          } else {
+            liquidity = liquidity + self.t_net[tick_next]
+          }
+          if liquidity < 0 {
+            return sqrt_cur
+          }
+        }
+        if zero_for_one {
+          tick_cur = tick_next - 1
+        } else {
+          tick_cur = tick_next
+        }
+      } else {
+        if sqrt_new != step_start {
+          tick_cur = tick_at_sqrt_ratio(sqrt_new)
+        }
+      }
+    }
+    return sqrt_cur
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Flash liquidity
+  // ─────────────────────────────────────────────────────────────────────
+
+  fn accrue_fee(is_token0: bool, paid: int): bool {
+    let den = self.fee_proto_1
+    if is_token0 {
+      den = self.fee_proto_0
+    }
+    let cut = 0
+    if den > 0 {
+      cut = paid / den
+    }
+    let rest = paid - cut
+    if is_token0 {
+      self.proto_owed_0 = self.proto_owed_0 + cut
+      if self.liq > 0 {
+        self.fg0 = self.fg0 + rest * q128() / self.liq
+      }
+    } else {
+      self.proto_owed_1 = self.proto_owed_1 + cut
+      if self.liq > 0 {
+        self.fg1 = self.fg1 + rest * q128() / self.liq
+      }
+    }
+    return true
+  }
+
+  // Lends out reserves within a single transaction. Repayment is verified by
+  // comparing balances rather than trusting the borrower, and the reentrancy
+  // guard prevents the callback from re-entering any pool entry point.
+  nonreentrant fn flash(recipient: address, amount0: int, amount1: int): bool {
+    require(self.started, "not initialized")
+    require(self.liq > 0, "no liquidity")
+    require(amount0 >= 0 && amount1 >= 0, "negative amount")
+    require(amount0 > 0 || amount1 > 0, "zero amount")
+    assert_address(recipient)
+
+    let fee0 = mul_div_up(amount0, self.fee_pips, 1000000)
+    let fee1 = mul_div_up(amount1, self.fee_pips, 1000000)
+    let before0 = call(self.token0, "balance_of", [self_addr])
+    let before1 = call(self.token1, "balance_of", [self_addr])
+
+    if amount0 > 0 {
+      require(call(self.token0, "transfer", [recipient, amount0]), "token0 loan failed")
+    }
+    if amount1 > 0 {
+      require(call(self.token1, "transfer", [recipient, amount1]), "token1 loan failed")
+    }
+    require(call(recipient, "on_flash", [fee0, fee1, amount0, amount1]), "flash callback failed")
+
+    let after0 = call(self.token0, "balance_of", [self_addr])
+    let after1 = call(self.token1, "balance_of", [self_addr])
+    require(after0 >= before0 + fee0, "token0 not repaid")
+    require(after1 >= before1 + fee1, "token1 not repaid")
+
+    let paid0 = after0 - before0
+    let paid1 = after1 - before1
+    if paid0 > 0 {
+      require(accrue_fee(true, paid0), "fee accrual failed")
+    }
+    if paid1 > 0 {
+      require(accrue_fee(false, paid1), "fee accrual failed")
+    }
+    emit Flash(caller, recipient, amount0, amount1, paid0, paid1)
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Protocol fee, administered through the factory
+  // ─────────────────────────────────────────────────────────────────────
+
+  // A denominator of n hands the protocol 1/n of the swap fee. 0 disables it.
+  // The floor of 4 keeps providers with at least three quarters of every fee.
+  fn set_fee_protocol(den0: int, den1: int): bool {
+    require(caller == self.factory, "not factory")
+    require(den0 == 0 || (den0 >= 4 && den0 <= 10), "token0 denominator out of range")
+    require(den1 == 0 || (den1 >= 4 && den1 <= 10), "token1 denominator out of range")
+    let o0 = self.fee_proto_0
+    let o1 = self.fee_proto_1
+    self.fee_proto_0 = den0
+    self.fee_proto_1 = den1
+    emit SetFeeProtocol(o0, o1, den0, den1)
+    return true
+  }
+
+  nonreentrant fn collect_protocol(recipient: address, amount0_req: int, amount1_req: int): bool {
+    require(caller == self.factory, "not factory")
+    assert_address(recipient)
+    require(amount0_req >= 0 && amount1_req >= 0, "negative amount")
+    let a0 = min(amount0_req, self.proto_owed_0)
+    let a1 = min(amount1_req, self.proto_owed_1)
+    if a0 > 0 {
+      self.proto_owed_0 = self.proto_owed_0 - a0
+      require(call(self.token0, "transfer", [recipient, a0]), "token0 payout failed")
+    }
+    if a1 > 0 {
+      self.proto_owed_1 = self.proto_owed_1 - a1
+      require(call(self.token1, "transfer", [recipient, a1]), "token1 payout failed")
+    }
+    emit CollectProtocol(recipient, a0, a1)
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Views
+  // ─────────────────────────────────────────────────────────────────────
+
+  view fn get_token0(): address { return self.token0 }
+  view fn get_token1(): address { return self.token1 }
+  view fn get_factory(): address { return self.factory }
+  view fn get_fee(): int { return self.fee_pips }
+  view fn get_tick_spacing(): int { return self.spacing }
+  view fn get_max_liquidity_per_tick(): int { return self.max_liq_per_tick }
+  view fn is_configured(): bool { return self.configured }
+
+  view fn get_sqrt_price(): int { return self.sqrt_price_x96 }
+  view fn get_tick(): int { return self.cur_tick }
+  view fn get_liquidity(): int { return self.liq }
+
+
+  view fn tick_liquidity_gross(t: int): int { return self.t_gross[t] }
+  view fn tick_liquidity_net(t: int): int { return self.t_net[t] }
+  view fn tick_is_initialized(t: int): bool { return self.t_init[t] }
+  view fn tick_bitmap_word(w: int): int { return self.tick_bitmap[w] }
+
+  view fn position_liquidity(o: address, l: int, u: int): int { return self.p_liq[o][l][u] }
+
+
+  // ── Packed readers ───────────────────────────────────────────────────
+  //
+  // Collections cannot be returned and locals cannot be appended to, but a
+  // string can be built in a loop, so bulk data crosses the boundary serialized.
+  // Without these an interface needs one round trip per tick, which no depth
+  // chart can afford.
+
+  // Every populated tick in a range as "tick:liquidityNet;" repeated. The walk
+  // is capped because even a free read has a finite effort budget; callers page
+  // wider ranges by advancing `lower`.
+  view fn tick_range_data(lower: int, upper: int): string {
+    require(self.configured, "not configured")
+    let s = self.spacing
+    let t = floor_div(lower, s) * s
+    let stop = floor_div(upper, s) * s
+    require(stop >= t, "empty range")
+    require((stop - t) / s + 1 <= 4096, "range too wide")
+    let out = ""
+    while t <= stop {
+      if self.t_init[t] {
+        out = concat(out, concat(to_string(t), concat(":", concat(to_string(self.t_net[t]), ";"))))
+      }
+      t = t + s
+    }
+    return out
+  }
+
+
+  // Everything an interface needs to price a trade, in one read instead of a
+  // dozen. This is the only way to read most of these fields: a contract may
+  // declare fewer than a hundred functions before the compiler starts reusing
+  // jump labels and the node refuses the program, so one reader replaces the
+  // getters rather than sitting alongside them.
+  // Field order: token0|token1|fee|spacing|sqrtPrice|tick|liquidity|feeGrowth0|
+  // feeGrowth1|feeProtocol0|feeProtocol1|protocolOwed0|protocolOwed1|started
+  view fn state_packed(): string {
+    let a = concat(concat(to_string(self.token0), "|"), concat(to_string(self.token1), "|"))
+    let b = concat(concat(to_string(self.fee_pips), "|"), concat(to_string(self.spacing), "|"))
+    let c = concat(concat(to_string(self.sqrt_price_x96), "|"), concat(to_string(self.cur_tick), "|"))
+    let d = concat(concat(to_string(self.liq), "|"), concat(to_string(self.fg0), "|"))
+    let e = concat(concat(to_string(self.fg1), "|"), concat(to_string(self.fee_proto_0), "|"))
+    let f = concat(concat(to_string(self.fee_proto_1), "|"), concat(to_string(self.proto_owed_0), "|"))
+    let g = concat(concat(to_string(self.proto_owed_1), "|"), to_string(self.started))
+    return concat(concat(concat(a, b), concat(c, d)), concat(e, concat(f, g)))
+  }
+
+  // The oracle ring buffer: where the cursor is, how far it currently extends,
+  // how far it has been asked to grow, and one slot's contents.
+  // Field order: index|cardinality|cardinalityNext|timestamp|tickCumulative
+  view fn oracle_packed(i: int): string {
+    let a = concat(concat(to_string(self.o_index), "|"), concat(to_string(self.o_card), "|"))
+    let b = concat(concat(to_string(self.o_card_next), "|"), concat(to_string(self.o_ts[i]), "|"))
+    return concat(concat(a, b), to_string(self.o_tcum[i]))
+  }
+
+  // A position's full accounting in one read.
+  // Field order: liquidity|owed0|owed1|feeGrowthInside0|feeGrowthInside1
+  view fn position_packed(owner: address, lower: int, upper: int): string {
+    let a = concat(to_string(self.p_liq[owner][lower][upper]), "|")
+    let b = concat(to_string(self.p_owed0[owner][lower][upper]), "|")
+    let c = concat(to_string(self.p_owed1[owner][lower][upper]), "|")
+    let d = concat(to_string(self.p_fg0[owner][lower][upper]), "|")
+    let e = to_string(self.p_fg1[owner][lower][upper])
+    return concat(concat(a, b), concat(c, concat(d, e)))
+  }
+
+  // Quote and resulting price together, so an interface can show the output and
+  // the true price impact without quoting the same trade twice.
+  // Field order: amountResult|sqrtPriceAfter
+  view fn quote_packed(dir: int, amount: int, sqrt_limit: int): string {
+    let out = quote(dir, amount, sqrt_limit)
+    let after = quote_price_after(dir, amount, sqrt_limit)
+    return concat(concat(to_string(out), "|"), to_string(after))
+  }
+}

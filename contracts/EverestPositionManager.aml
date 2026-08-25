@@ -1,0 +1,465 @@
+// EverestSwap position manager.
+//
+// A concentrated-liquidity position is defined by a pool, a lower tick and an
+// upper tick, so it is not interchangeable with any other position the way a
+// whole-curve share is. This contract wraps each one in a transferable
+// non-fungible token, which gives positions an owner that can change without
+// disturbing the liquidity itself.
+//
+// The chain has no non-fungible token standard, so the registry is carried
+// here: owner_of, position_count, approve, set_approval_for_all and transfer_from,
+// plus an index that lets a holder's positions be enumerated without scanning
+// every id ever issued.
+//
+// Several positions can share one pool range. The pool aggregates those into a
+// single position of its own, so this contract tracks each token's own fee
+// snapshot and divides the pool's earnings between them. The pool always
+// realizes fees for the whole range at least as eagerly as this contract
+// claims a share of them, so the pool can never owe less than the sum of what
+// the tokens are entitled to.
+
+contract EverestPositionManager {
+  state {
+    factory: address
+    owner: address
+
+    // ── non-fungible registry ──
+    next_id: int
+    nft_owner: map[int]address
+    nft_approved: map[int]address
+    nft_operator: map[address]map[address]bool
+    nft_balance: map[address]int
+    // owner -> slot -> token id, and the reverse, so removal is a swap-and-pop
+    // instead of a scan.
+    owner_slot: map[address]map[int]int
+    token_slot: map[int]int
+
+    // ── position data ──
+    pos_pool: map[int]address
+    pos_lower: map[int]int
+    pos_upper: map[int]int
+    pos_liq: map[int]int
+    pos_fg0: map[int]int     // fee growth inside the range at last settlement
+    pos_fg1: map[int]int
+    pos_owed0: map[int]int
+    pos_owed1: map[int]int
+  }
+
+  event Transfer(from: address, to: address, token_id: int)
+  event Approval(owner: address, approved: address, token_id: int)
+  event ApprovalForAll(owner: address, operator: address, approved: bool)
+  event PositionMinted(token_id: int, owner: address, pool: address, tick_lower: int, tick_upper: int, liquidity: int, amount0: int, amount1: int)
+  event LiquidityIncreased(token_id: int, liquidity: int, amount0: int, amount1: int)
+  event LiquidityDecreased(token_id: int, liquidity: int, recipient: address)
+  event FeesCollected(token_id: int, recipient: address, amount0: int, amount1: int)
+  event PositionBurned(token_id: int)
+
+  constructor() {
+    self.owner = caller
+    self.next_id = 1
+  }
+
+  // An address that was never written reads back as "0" rather than empty, and an
+  // explicitly cleared one reads back as empty, so emptiness has to cover both.
+  // Testing it any other way silently inverts every one-time-setter guard.
+  view fn unset(a: address): bool {
+    return a == "0" || a == ""
+  }
+
+  fn set_factory(f: address): bool {
+    require(caller == self.owner, "not owner")
+    require(unset(self.factory), "factory already set")
+    assert_address(f)
+    self.factory = f
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Non-fungible registry
+  // ─────────────────────────────────────────────────────────────────────
+
+  view fn owner_of(token_id: int): address {
+    let o = self.nft_owner[token_id]
+    require(!unset(o), "no such position")
+    return o
+  }
+
+  // How many positions a holder has. `balance_of` carries the same number for
+  // contracts calling in, but a node answers `balance_of` over the read RPC from
+  // its own token-ledger convention rather than from this function, so anything
+  // reading over RPC must ask for `position_count` and will otherwise be told
+  // zero.
+  view fn position_count(who: address): int {
+    return self.nft_balance[who]
+  }
+
+  view fn balance_of(who: address): int {
+    return self.nft_balance[who]
+  }
+
+  view fn get_approved(token_id: int): address {
+    require(!unset(self.nft_owner[token_id]), "no such position")
+    return self.nft_approved[token_id]
+  }
+
+  view fn is_approved_for_all(who: address, operator: address): bool {
+    return self.nft_operator[who][operator]
+  }
+
+  // Whether `who` may act on this position: the holder, an operator the holder
+  // trusts with everything, or an address approved for this one position.
+  view fn is_authorized(who: address, token_id: int): bool {
+    let o = self.nft_owner[token_id]
+    if unset(o) {
+      return false
+    }
+    if who == o {
+      return true
+    }
+    if self.nft_approved[token_id] == who {
+      return true
+    }
+    return self.nft_operator[o][who]
+  }
+
+  // Token at `slot` in a holder's index. Slots run 0..position_count-1 and are
+  // not stable across transfers or burns.
+  view fn token_of_owner_at(who: address, slot: int): int {
+    require(slot < self.nft_balance[who], "slot out of range")
+    return self.owner_slot[who][slot]
+  }
+
+  fn index_add(to: address, token_id: int): bool {
+    let n = self.nft_balance[to]
+    self.owner_slot[to][n] = token_id
+    self.token_slot[token_id] = n
+    self.nft_balance[to] = n + 1
+    return true
+  }
+
+  fn index_remove(from: address, token_id: int): bool {
+    let last = self.nft_balance[from] - 1
+    let slot = self.token_slot[token_id]
+    if slot != last {
+      let moved = self.owner_slot[from][last]
+      self.owner_slot[from][slot] = moved
+      self.token_slot[moved] = slot
+    }
+    self.owner_slot[from][last] = 0
+    self.nft_balance[from] = last
+    return true
+  }
+
+  fn approve(to: address, token_id: int): bool {
+    let o = self.nft_owner[token_id]
+    require(!unset(o), "no such position")
+    require(caller == o || self.nft_operator[o][caller], "not authorized")
+    self.nft_approved[token_id] = to
+    emit Approval(o, to, token_id)
+    return true
+  }
+
+  // 1 grants the operator every position this holder owns, 0 revokes it. An int
+  // rather than a bool: a flag arriving as text reads as true whatever it said,
+  // and an approval that cannot be revoked is the worst version of that bug.
+  fn set_approval_for_all(operator: address, approved: int): bool {
+    assert_address(operator)
+    require(operator != caller, "cannot approve self")
+    let on = approved != 0
+    self.nft_operator[caller][operator] = on
+    emit ApprovalForAll(caller, operator, on)
+    return true
+  }
+
+  fn transfer_from(from: address, to: address, token_id: int): bool {
+    assert_address(to)
+    require(!unset(to), "transfer to empty address")
+    let o = self.nft_owner[token_id]
+    require(!unset(o), "no such position")
+    require(o == from, "from is not the holder")
+    require(is_authorized(caller, token_id), "not authorized")
+    self.nft_approved[token_id] = ""
+    require(index_remove(from, token_id), "index update failed")
+    require(index_add(to, token_id), "index update failed")
+    self.nft_owner[token_id] = to
+    emit Transfer(from, to, token_id)
+    return true
+  }
+
+  fn transfer(to: address, token_id: int): bool {
+    return transfer_from(caller, to, token_id)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Fee settlement
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Moves this token's share of the range's earnings into its own owed balance
+  // and re-snapshots it. Must run before any change to the token's liquidity,
+  // since earnings accrue against the liquidity that was in place.
+  fn settle(token_id: int): bool {
+    let p = self.pos_pool[token_id]
+    let l = self.pos_lower[token_id]
+    let u = self.pos_upper[token_id]
+    let liq = self.pos_liq[token_id]
+    let in0 = call(p, "fee_growth_inside_0", [l, u])
+    let in1 = call(p, "fee_growth_inside_1", [l, u])
+    if liq > 0 {
+      let d0 = in0 - self.pos_fg0[token_id]
+      let d1 = in1 - self.pos_fg1[token_id]
+      if d0 > 0 {
+        self.pos_owed0[token_id] = self.pos_owed0[token_id] + d0 * liq / q128()
+      }
+      if d1 > 0 {
+        self.pos_owed1[token_id] = self.pos_owed1[token_id] + d1 * liq / q128()
+      }
+    }
+    self.pos_fg0[token_id] = in0
+    self.pos_fg1[token_id] = in1
+    return true
+  }
+
+  view fn q128(): int {
+    return 340282366920938463463374607431768211456
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Position lifecycle
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Pulls the deposit from the caller, hands it to the pool, and issues a token
+  // representing the resulting position. The pool charges this contract, so the
+  // allowance granted is exactly what the pool will take and nothing is left
+  // standing afterwards.
+  fn provide(p: address, lower: int, upper: int, liq: int, a0: int, a1: int, deadline: int): bool {
+    let t0 = call(p, "get_token0", [])
+    let t1 = call(p, "get_token1", [])
+    if a0 > 0 {
+      require(call(t0, "pull", [caller, self_addr, a0]), "token0 deposit failed")
+      require(call(t0, "grant", [p, a0]), "token0 allowance failed")
+    }
+    if a1 > 0 {
+      require(call(t1, "pull", [caller, self_addr, a1]), "token1 deposit failed")
+      require(call(t1, "grant", [p, a1]), "token1 allowance failed")
+    }
+    require(call(p, "mint", [self_addr, lower, upper, liq, a0, a1, deadline]), "pool mint failed")
+    return true
+  }
+
+  nonreentrant fn mint(p: address, lower: int, upper: int, amount0_desired: int, amount1_desired: int, amount0_min: int, amount1_min: int, recipient: address, deadline: int): int {
+    require(!unset(self.factory), "factory not set")
+    require(call(self.factory, "get_is_pool", [p]), "unknown pool")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+    require(amount0_desired >= 0 && amount1_desired >= 0, "negative amount")
+
+    let liq = call(p, "liquidity_for_amounts", [lower, upper, amount0_desired, amount1_desired])
+    require(liq > 0, "deposit too small for range")
+    let a0 = call(p, "amount0_for_liquidity", [lower, upper, liq])
+    let a1 = call(p, "amount1_for_liquidity", [lower, upper, liq])
+    require(a0 >= amount0_min, "token0 deposit below minimum")
+    require(a1 >= amount1_min, "token1 deposit below minimum")
+    require(a0 <= amount0_desired, "token0 deposit above desired")
+    require(a1 <= amount1_desired, "token1 deposit above desired")
+    require(provide(p, lower, upper, liq, a0, a1, deadline), "provide failed")
+
+    let id = self.next_id
+    self.next_id = id + 1
+    self.nft_owner[id] = recipient
+    require(index_add(recipient, id), "index update failed")
+    self.pos_pool[id] = p
+    self.pos_lower[id] = lower
+    self.pos_upper[id] = upper
+    self.pos_liq[id] = liq
+    self.pos_fg0[id] = call(p, "fee_growth_inside_0", [lower, upper])
+    self.pos_fg1[id] = call(p, "fee_growth_inside_1", [lower, upper])
+    self.pos_owed0[id] = 0
+    self.pos_owed1[id] = 0
+
+    emit Transfer("", recipient, id)
+    emit PositionMinted(id, recipient, p, lower, upper, liq, a0, a1)
+    return id
+  }
+
+  nonreentrant fn increase_liquidity(token_id: int, amount0_desired: int, amount1_desired: int, amount0_min: int, amount1_min: int, deadline: int): bool {
+    require(is_authorized(caller, token_id), "not authorized")
+    require(epoch <= deadline, "deadline passed")
+    let p = self.pos_pool[token_id]
+    let lower = self.pos_lower[token_id]
+    let upper = self.pos_upper[token_id]
+
+    // Settle first: the earnings so far belong to the liquidity already there.
+    require(settle(token_id), "settle failed")
+
+    let liq = call(p, "liquidity_for_amounts", [lower, upper, amount0_desired, amount1_desired])
+    require(liq > 0, "deposit too small for range")
+    let a0 = call(p, "amount0_for_liquidity", [lower, upper, liq])
+    let a1 = call(p, "amount1_for_liquidity", [lower, upper, liq])
+    require(a0 >= amount0_min, "token0 deposit below minimum")
+    require(a1 >= amount1_min, "token1 deposit below minimum")
+    require(a0 <= amount0_desired, "token0 deposit above desired")
+    require(a1 <= amount1_desired, "token1 deposit above desired")
+    require(provide(p, lower, upper, liq, a0, a1, deadline), "provide failed")
+
+    self.pos_liq[token_id] = self.pos_liq[token_id] + liq
+    emit LiquidityIncreased(token_id, liq, a0, a1)
+    return true
+  }
+
+  // Withdraws principal straight to the holder. Earned fees stay owed to the
+  // token and are taken separately with collect, so a partial exit does not
+  // force a fee claim.
+  nonreentrant fn decrease_liquidity(token_id: int, liq: int, amount0_min: int, amount1_min: int, deadline: int): bool {
+    require(is_authorized(caller, token_id), "not authorized")
+    require(epoch <= deadline, "deadline passed")
+    require(liq > 0, "zero liquidity")
+    require(self.pos_liq[token_id] >= liq, "insufficient position liquidity")
+    let p = self.pos_pool[token_id]
+    let lower = self.pos_lower[token_id]
+    let upper = self.pos_upper[token_id]
+    let holder = self.nft_owner[token_id]
+
+    require(settle(token_id), "settle failed")
+    self.pos_liq[token_id] = self.pos_liq[token_id] - liq
+    require(call(p, "burn", [holder, lower, upper, liq, amount0_min, amount1_min, deadline]), "pool burn failed")
+    emit LiquidityDecreased(token_id, liq, holder)
+    return true
+  }
+
+  // Realizes the range's earnings in the pool, works out this token's share,
+  // and pays it out. The pool is only poked while the aggregate range still
+  // holds liquidity, since an empty range has nothing to realize.
+  nonreentrant fn collect(token_id: int, recipient: address, amount0_max: int, amount1_max: int): bool {
+    require(is_authorized(caller, token_id), "not authorized")
+    assert_address(recipient)
+    require(amount0_max >= 0 && amount1_max >= 0, "negative amount")
+    let p = self.pos_pool[token_id]
+    let lower = self.pos_lower[token_id]
+    let upper = self.pos_upper[token_id]
+
+    if call(p, "position_liquidity", [self_addr, lower, upper]) > 0 {
+      require(call(p, "poke", [lower, upper]), "pool poke failed")
+    }
+    require(settle(token_id), "settle failed")
+
+    let a0 = min(amount0_max, self.pos_owed0[token_id])
+    let a1 = min(amount1_max, self.pos_owed1[token_id])
+    require(a0 > 0 || a1 > 0, "nothing to collect")
+    self.pos_owed0[token_id] = self.pos_owed0[token_id] - a0
+    self.pos_owed1[token_id] = self.pos_owed1[token_id] - a1
+    require(call(p, "collect", [recipient, lower, upper, a0, a1]), "pool collect failed")
+    emit FeesCollected(token_id, recipient, a0, a1)
+    return true
+  }
+
+  // Retires an empty position. Requiring it to be drained first means the token
+  // can never be destroyed while it still represents a claim.
+  nonreentrant fn burn(token_id: int): bool {
+    require(is_authorized(caller, token_id), "not authorized")
+    require(self.pos_liq[token_id] == 0, "position still holds liquidity")
+    require(self.pos_owed0[token_id] == 0 && self.pos_owed1[token_id] == 0, "fees not collected")
+    let holder = self.nft_owner[token_id]
+    require(index_remove(holder, token_id), "index update failed")
+    self.nft_owner[token_id] = ""
+    self.nft_approved[token_id] = ""
+    self.pos_pool[token_id] = ""
+    self.pos_liq[token_id] = 0
+    emit Transfer(holder, "", token_id)
+    emit PositionBurned(token_id)
+    return true
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Views
+  // ─────────────────────────────────────────────────────────────────────
+
+  view fn get_factory(): address { return self.factory }
+  view fn get_owner(): address { return self.owner }
+  view fn get_next_id(): int { return self.next_id }
+  view fn total_issued(): int { return self.next_id - 1 }
+
+  view fn position_pool(token_id: int): address { return self.pos_pool[token_id] }
+  view fn position_lower(token_id: int): int { return self.pos_lower[token_id] }
+  view fn position_upper(token_id: int): int { return self.pos_upper[token_id] }
+  view fn position_liquidity(token_id: int): int { return self.pos_liq[token_id] }
+  view fn position_owed_0(token_id: int): int { return self.pos_owed0[token_id] }
+  view fn position_owed_1(token_id: int): int { return self.pos_owed1[token_id] }
+  view fn position_fee_growth_0(token_id: int): int { return self.pos_fg0[token_id] }
+  view fn position_fee_growth_1(token_id: int): int { return self.pos_fg1[token_id] }
+  view fn position_exists(token_id: int): bool { return !unset(self.nft_owner[token_id]) }
+
+  // Fees this token could claim right now, without settling first. This is the
+  // figure an interface should show: settled balance plus the unrealized share
+  // of the range's growth since this token last settled.
+  view fn fees_owed_0(token_id: int): int {
+    let liq = self.pos_liq[token_id]
+    let base = self.pos_owed0[token_id]
+    if liq == 0 {
+      return base
+    }
+    let d = call(self.pos_pool[token_id], "fee_growth_inside_0", [self.pos_lower[token_id], self.pos_upper[token_id]]) - self.pos_fg0[token_id]
+    if d <= 0 {
+      return base
+    }
+    return base + d * liq / q128()
+  }
+
+  view fn fees_owed_1(token_id: int): int {
+    let liq = self.pos_liq[token_id]
+    let base = self.pos_owed1[token_id]
+    if liq == 0 {
+      return base
+    }
+    let d = call(self.pos_pool[token_id], "fee_growth_inside_1", [self.pos_lower[token_id], self.pos_upper[token_id]]) - self.pos_fg1[token_id]
+    if d <= 0 {
+      return base
+    }
+    return base + d * liq / q128()
+  }
+
+  // ── Packed readers ───────────────────────────────────────────────────
+  //
+  // A portfolio view needs nine figures per position. Serializing them into one
+  // string turns a wallet with twenty positions from 180 round trips into one.
+
+  // Field order: id|owner|pool|lower|upper|liquidity|owed0|owed1|feesOwed0|feesOwed1
+  // The fee figures include the share not yet realized by the pool, which is
+  // what a holder expects to see as claimable.
+  view fn position_packed(token_id: int): string {
+    require(!unset(self.nft_owner[token_id]), "no such position")
+    let a = concat(concat(to_string(token_id), "|"), concat(to_string(self.nft_owner[token_id]), "|"))
+    let b = concat(concat(to_string(self.pos_pool[token_id]), "|"), concat(to_string(self.pos_lower[token_id]), "|"))
+    let c = concat(concat(to_string(self.pos_upper[token_id]), "|"), concat(to_string(self.pos_liq[token_id]), "|"))
+    let d = concat(concat(to_string(self.pos_owed0[token_id]), "|"), concat(to_string(self.pos_owed1[token_id]), "|"))
+    let e = concat(concat(to_string(fees_owed_0(token_id)), "|"), to_string(fees_owed_1(token_id)))
+    return concat(concat(a, b), concat(concat(c, d), e))
+  }
+
+  // Every position an address holds, as the rows above separated by ";".
+  // Capped per call so a large holder pages rather than exhausting the read.
+  view fn positions_of_packed(who: address, start: int, count: int): string {
+    require(start >= 0 && count > 0 && count <= 64, "bad page")
+    let held = self.nft_balance[who]
+    let i = start
+    let stop = min(start + count, held)
+    let out = ""
+    while i < stop {
+      out = concat(out, concat(position_packed(self.owner_slot[who][i]), ";"))
+      i = i + 1
+    }
+    return out
+  }
+
+  // Just the identifiers a holder owns, for an interface that wants the list
+  // before deciding which positions to detail.
+  view fn token_ids_of_packed(who: address): string {
+    let held = self.nft_balance[who]
+    let i = 0
+    let out = ""
+    while i < held {
+      out = concat(out, concat(to_string(self.owner_slot[who][i]), ";"))
+      i = i + 1
+    }
+    return out
+  }
+}

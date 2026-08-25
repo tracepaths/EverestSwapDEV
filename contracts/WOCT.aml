@@ -1,0 +1,303 @@
+contract WOCT {
+  state {
+    name: string
+    symbol: string
+    // [V2-AUDIT-FIX V2-LOW-3] total_supply is backed 1:1 by native OCT locked in this contract.
+    // It grows with each deposit and shrinks with each withdrawal.
+    // There is no hard max_supply enforced by this contract because: (a) native OCT supply is
+    // itself bounded by the Octra protocol, and (b) adding an arbitrary cap would break the
+    // wrapping guarantee.  See the max_deposit_per_tx limit for a per-transaction rate limiter.
+    total_supply: int
+    decimals: int
+    owner: address
+    balances: map[address]int
+    grants: map[address]map[address]int
+    paused: bool
+    // [AUDIT-FIX NEW-21] Limit deposit per transaction to reduce whale manipulation
+    max_deposit_per_tx: int
+    // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership transfer
+    pending_owner: address
+    // [AUDIT-FIX] Reentrancy guard
+    locked: bool
+    // [V7-CRIT-10] Pull pattern: track pending withdrawals instead of direct transfer
+    // pending_withdrawals[caller] = amount of OCT waiting to be claimed
+    // [SECURITY] CRITICAL FIX: declared INSIDE state block so it persists across calls
+    pending_withdrawals: map[address]int
+    // [SECURITY] H-1: Total pending withdrawals across all users. Used as a ceiling
+    // in `withdraw` to prevent aggregate pending from exceeding total_supply
+    // (which would make the contract insolvent).
+    total_pending_withdrawals: int
+  }
+
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+  event Mint(to: address, amount: int)
+  event Burn(from: address, amount: int)
+  event Paused(status: bool)
+  // [V2-AUDIT-FIX V2-CRIT-4] Event for owner-rescue of unaccounted native OCT
+  event NativeRescued(to: address, amount: int)
+  // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership events (mirrors SwapPool)
+  event OwnershipTransferProposed(current_owner: address, proposed_owner: address)
+  event OwnershipTransferred(old_owner: address, new_owner: address)
+  // [SECURITY] M-10: Event for max deposit limit changes
+  event MaxDepositPerTxSet(old_limit: int, new_limit: int)
+
+  constructor() {
+    self.name = "Wrapped OCT"
+    self.symbol = "WOCT"
+    self.total_supply = 0
+    self.decimals = 6
+    self.owner = origin
+    self.paused = false
+    // [S1-WOCT-02] Default: 100M OCT per tx (100000000000000 = 100M * 10^6)
+    self.max_deposit_per_tx = 100000000000000
+    // [V2-AUDIT-FIX V2-LOW-2] No pending owner at construction
+    self.pending_owner = ""
+    // [AUDIT-FIX] No reentrancy lock at construction
+    self.locked = false
+    // [SECURITY] H-1: Initialize total pending withdrawals
+    self.total_pending_withdrawals = 0
+  }
+
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
+
+  view fn allowance(owner_addr: address, spender: address): int {
+    return self.grants[owner_addr][spender]
+  }
+
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn is_paused(): bool { return self.paused }
+
+  // [AUDIT-FIX HIGH-6] deposit: validate value > 0, mint 1:1, CEI pattern
+  // [V2-AUDIT-FIX V2-CRIT-4] Note: if native OCT is sent to this contract without calling
+  //   deposit() (e.g. via a direct transfer at the protocol level), those OCT are unaccounted
+  //   in total_supply and balances.  The rescue_native() function below allows the owner to
+  //   retrieve such excess OCT.  On the current Octra devnet, arbitrary native transfers to
+  //   contracts are not expected, but the safety valve is provided for defense-in-depth.
+  payable fn deposit(): int {
+    // [SECURITY] H-2: Add reentrancy guard for consistency with other state-changing fns
+    require(!self.locked, "reentrancy guard")
+    require(!self.paused, "contract paused")
+    require(value > 0, "zero amount")
+    // [AUDIT-FIX NEW-21] Check per-tx deposit limit if configured
+    require(self.max_deposit_per_tx == 0 || value <= self.max_deposit_per_tx, "deposit exceeds limit")
+    let amt = value
+    // [SECURITY] M-7: Overflow guard — ensure new total_supply doesn't overflow
+    let new_supply = self.total_supply + amt
+    require(new_supply > self.total_supply, "supply overflow")
+    // [AUDIT-FIX] CEI: Update balance and total_supply before emitting events
+    self.balances[caller] = self.balances[caller] + amt
+    self.total_supply = new_supply
+    emit Mint(caller, amt)
+    emit Transfer("", caller, amt)
+    return amt
+  }
+
+  // [V7-CRIT-10] Pull pattern: track pending withdrawals instead of direct transfer
+  // User must call claim_withdrawal() to receive native OCT (pull pattern)
+  fn withdraw(amt: int): bool {
+    require(!self.paused, "contract paused")
+    require(!self.locked, "reentrancy guard")
+    require(amt > 0, "zero amount")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    // [SECURITY] H-1: Aggregate ceiling — prevent pending claims from exceeding supply.
+    // This protects the contract from becoming insolvent (vault < pending).
+    require(self.total_pending_withdrawals + amt <= self.total_supply, "withdraw would exceed supply (pending > supply)")
+
+    self.locked = true
+
+    // [AUDIT-FIX HIGH-6] CEI: Reduce WOCT balance and total_supply BEFORE recording withdrawal
+    self.balances[caller] = bal - amt
+    self.total_supply = self.total_supply - amt
+
+    // [V7-CRIT-10] Record pending withdrawal instead of direct transfer
+    self.pending_withdrawals[caller] += amt
+    self.total_pending_withdrawals += amt
+
+    // [AUDIT-FIX] Emit burn events (CEI)
+    emit Burn(caller, amt)
+    emit Transfer(caller, "", amt)
+
+    self.locked = false
+
+    return true
+  }
+
+  // [V7-CRIT-10] Claim pending OCT withdrawal (pull pattern)
+  // [V7-PASS10] HIGH-6: removed `!self.paused` check — pending withdrawals are
+  // already segregated funds owed to the user. Pausing transfers shouldn't lock
+  // claims. Pausing affects new deposits/withdrawals, not existing claims.
+  fn claim_withdrawal(): bool {
+    require(!self.locked, "reentrancy guard")
+    let amount = self.pending_withdrawals[caller]
+    require(amount > 0, "no pending withdrawal")
+
+    self.locked = true
+
+    // [SECURITY] H-4: Verify the contract has enough native OCT to pay out before
+    // zeroing the pending withdrawal. If the contract balance is insufficient, the
+    // user would lose their withdrawal claim (the zeroed state would persist if the
+    // transfer silently fails). Although the transfer() builtin reverts on failure,
+    // an explicit pre-check provides defense in depth.
+    let contract_balance = balance(self_addr)
+    require(contract_balance >= amount, "insufficient contract OCT balance")
+
+    // [SECURITY] H-1: CEI order — clear pending AFTER balance check.
+    // Subtract from total_pending_withdrawals FIRST to maintain invariant.
+    // If transfer reverts, the whole tx reverts and state is preserved.
+    self.total_pending_withdrawals = self.total_pending_withdrawals - amount
+    self.pending_withdrawals[caller] = 0
+
+    // [V7-CRIT-10] Transfer native OCT - if this fails, the whole tx reverts
+    // (including the zeroed state) so the user can retry.
+    transfer(caller, amount)
+
+    // [AUDIT-FIX F-2] Defense-in-depth: confirm the native balance actually dropped
+    // by `amount`. If transfer() ever fails WITHOUT reverting (e.g. recipient is a
+    // contract that rejects), this check reverts the whole tx, restoring the
+    // pending withdrawal state instead of silently losing the user's claim.
+    let bal_after = balance(self_addr)
+    require(contract_balance - amount == bal_after, "withdrawal transfer failed")
+
+    self.locked = false
+
+    return true
+  }
+
+  // [SECURITY] H-1: View total pending withdrawals across all users
+  view fn get_total_pending_withdrawals(): int {
+    return self.total_pending_withdrawals
+  }
+
+  // [V7-CRIT-10] View pending withdrawal amount
+  view fn get_pending_withdrawal(addr: address): int {
+    return self.pending_withdrawals[addr]
+  }
+
+  // [V2-AUDIT-FIX V2-MED-2] Removed the self-transfer restriction (to != caller).
+  //   Self-transfer is not a security issue; some protocols use it as a notification
+  //   mechanism.  The previous check unnecessarily limited composability.
+  fn transfer(to: address, amt: int): bool {
+    // [SECURITY] H-3: Add reentrancy guard for defense-in-depth
+    require(!self.locked, "reentrancy guard")
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    // [AUDIT-FIX] CEI: update state before transfer
+    self.balances[caller] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    emit Transfer(caller, to, amt)
+    return true
+  }
+
+  fn grant(spender: address, amt: int): bool {
+    require(!self.paused, "contract paused")
+    assert_address(spender)
+    // [AUDIT-FIX NEW-16] Prevent grant to zero address
+    require(spender != "", "grant to zero address")
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  fn pull(from: address, to: address, amt: int): bool {
+    // [SECURITY] H-3: Add reentrancy guard for defense-in-depth
+    require(!self.locked, "reentrancy guard")
+    require(!self.paused, "contract paused")
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    // [AUDIT-FIX] CEI: Update state before transfer
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
+  }
+
+  // [AUDIT-FIX LOW-4] Emergency pause
+  fn set_paused(status: bool): bool {
+    require(caller == self.owner, "not authorized")
+    self.paused = status
+    emit Paused(status)
+    return true
+  }
+
+  // [AUDIT-FIX NEW-21] Set per-tx deposit limit
+  fn set_max_deposit_per_tx(limit: int): bool {
+    require(caller == self.owner, "not authorized")
+    require(limit >= 0, "limit must be non-negative")
+    // [SECURITY] Minimum floor to prevent DoS via setting limit too low (e.g., 1 wei)
+    // 0 = unlimited (allowed)
+    if limit > 0 {
+      require(limit >= 1000, "limit too low (min 1000)")
+      // [SECURITY] H-9: Max ceiling raised to 1T WOCT (10^18 base units with 6 decimals)
+      // for mainnet flexibility. Still well within int64 safe range (~9.2e18).
+      require(limit <= 1000000000000000000, "limit too high (max 1T WOCT)")
+    }
+    let old_limit = self.max_deposit_per_tx
+    self.max_deposit_per_tx = limit
+    // [SECURITY] M-10: Emit event for transparency
+    emit MaxDepositPerTxSet(old_limit, limit)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-CRIT-4] rescue_native: owner can retrieve native OCT that was sent
+  // directly to this contract (without calling deposit()), i.e. the surplus of the
+  // contract's native balance over total_supply.  This prevents OCT from being permanently
+  // trapped due to accidental or malicious direct transfers.
+  fn rescue_native(): bool {
+    require(caller == self.owner, "not authorized")
+    require(!self.locked, "reentrancy guard")
+    self.locked = true
+    let contract_balance = balance(self_addr)
+    // [AUDIT-FIX H-2] Surplus must exclude OCT already owed to users as pending
+    // withdrawals. Previously surplus = balance - total_supply, which counted
+    // pending-withdrawal OCT as rescuable and let the owner sweep funds users had
+    // already claimed via withdraw() but not yet pulled via claim_withdrawal().
+    // After such a rescue, claim_withdrawal() would revert forever (balance < pending).
+    require(contract_balance > self.total_supply + self.total_pending_withdrawals, "no surplus to rescue")
+    let surplus = contract_balance - self.total_supply - self.total_pending_withdrawals
+    transfer(self.owner, surplus)
+    emit NativeRescued(self.owner, surplus)
+    self.locked = false
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] Two-step ownership transfer — step 1: propose
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not authorized")
+    assert_address(new_owner)
+    // [AUDIT-FIX NEW-13] Validate new_owner is not zero
+    require(new_owner != "", "new owner is zero address")
+    self.pending_owner = new_owner
+    emit OwnershipTransferProposed(self.owner, new_owner)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] Step 2: proposed new owner must accept
+  fn accept_ownership(): bool {
+    require(caller == self.pending_owner, "not pending owner")
+    require(self.pending_owner != "", "no pending transfer")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    // [SECURITY] Reset pending_owner to empty string (not origin) to prevent ownership hijack
+    self.pending_owner = ""
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  // [V2-AUDIT-FIX V2-LOW-2] View pending owner
+  view fn get_pending_owner(): address {
+    return self.pending_owner
+  }
+}

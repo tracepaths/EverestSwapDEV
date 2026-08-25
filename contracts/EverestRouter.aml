@@ -1,0 +1,292 @@
+// EverestSwap swap router.
+//
+// Trades are routed through one to three pools. The router holds the trader's
+// input for the duration of the transaction, hands each pool exactly the
+// allowance it is about to draw, and passes the output of one hop into the next.
+//
+// Intermediate amounts are read from the router's own balance rather than from
+// a return value, so a hop is credited with exactly what arrived. Any residue
+// left by rounding is swept back to the trader before the call ends, and the
+// router never keeps a standing allowance.
+//
+// Only pools registered with the factory are accepted, which is what stops a
+// caller from pointing a hop at a contract that merely looks like a pool.
+//
+// A direction is an int, not a bool: 1 sells token0 for token1, 0 sells token1
+// for token0. A boolean handed to another contract on this VM arrives as `true`
+// whatever it was — the argument travels as text and any text reads as true — so
+// a flag that has to reach a pool cannot be one.
+
+contract EverestRouter {
+  state {
+    factory: address
+    owner: address
+  }
+
+  event Routed(trader: address, recipient: address, hops: int, amount_in: int, amount_out: int)
+  event Swept(token: address, to: address, amount: int)
+
+  constructor() {
+    self.owner = caller
+  }
+
+  // An address that was never written reads back as "0" rather than empty, and an
+  // explicitly cleared one reads back as empty, so emptiness has to cover both.
+  // Testing it any other way silently inverts every one-time-setter guard.
+  view fn unset(a: address): bool {
+    return a == "0" || a == ""
+  }
+
+  fn set_factory(f: address): bool {
+    require(caller == self.owner, "not owner")
+    require(unset(self.factory), "factory already set")
+    assert_address(f)
+    self.factory = f
+    return true
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+
+  view fn require_pool(p: address): bool {
+    require(!unset(self.factory), "factory not set")
+    require(call(self.factory, "get_is_pool", [p]), "unknown pool")
+    return true
+  }
+
+  view fn token_in_of(p: address, dir: int): address {
+    if dir != 0 {
+      return call(p, "get_token0", [])
+    }
+    return call(p, "get_token1", [])
+  }
+
+  view fn token_out_of(p: address, dir: int): address {
+    if dir != 0 {
+      return call(p, "get_token1", [])
+    }
+    return call(p, "get_token0", [])
+  }
+
+  // Runs one hop with tokens the router already holds. `draw` is what the pool
+  // will take, granted exactly so nothing is left standing afterwards. For an
+  // exact-output hop the caller has already quoted the cost, so it is passed in
+  // rather than quoted a second time.
+  fn hop(p: address, dir: int, amount: int, draw: int, limit: int, to: address, deadline: int): bool {
+    require(draw > 0, "nothing to pay with")
+    let tin = token_in_of(p, dir)
+    let far = call(p, "default_price_limit", [dir])
+    require(call(tin, "grant", [p, draw]), "input allowance failed")
+    require(call(p, "swap", [to, dir, amount, far, limit, deadline]), "swap failed")
+    return true
+  }
+
+  // Returns anything the router is still holding to the trader. Rounding in an
+  // exact-output trade can leave a few units behind; they belong to the trader,
+  // not to the router.
+  fn sweep(token: address, to: address): bool {
+    let bal = call(token, "balance_of", [self_addr])
+    if bal > 0 {
+      require(call(token, "transfer", [to, bal]), "sweep failed")
+      emit Swept(token, to, bal)
+    }
+    return true
+  }
+
+  fn take(token: address, from: address, amount: int): bool {
+    require(call(token, "pull", [from, self_addr, amount]), "input payment failed")
+    return true
+  }
+
+  // ── Exact input ──────────────────────────────────────────────────────
+
+  nonreentrant fn exact_input_single(p: address, dir: int, amount_in: int, amount_out_min: int, recipient: address, deadline: int): bool {
+    require(require_pool(p), "bad pool")
+    require(amount_in > 0, "zero input")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+    let tin = token_in_of(p, dir)
+    let tout = token_out_of(p, dir)
+    require(take(tin, caller, amount_in), "funding failed")
+    let before = call(tout, "balance_of", [recipient])
+    require(hop(p, dir, amount_in, amount_in, amount_out_min, recipient, deadline), "hop failed")
+    emit Routed(caller, recipient, 1, amount_in, call(tout, "balance_of", [recipient]) - before)
+    return true
+  }
+
+  nonreentrant fn exact_input_two(p1: address, z1: int, p2: address, z2: int, amount_in: int, amount_out_min: int, recipient: address, deadline: int): bool {
+    require(require_pool(p1) && require_pool(p2), "bad pool")
+    require(p1 != p2, "duplicate pool in route")
+    require(amount_in > 0, "zero input")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+
+    let tin = token_in_of(p1, z1)
+    let mid = token_out_of(p1, z1)
+    require(mid == token_in_of(p2, z2), "route tokens do not join")
+    require(take(tin, caller, amount_in), "funding failed")
+
+    let tout = token_out_of(p2, z2)
+    let before = call(mid, "balance_of", [self_addr])
+    require(hop(p1, z1, amount_in, amount_in, 0, self_addr, deadline), "first hop failed")
+    let got = call(mid, "balance_of", [self_addr]) - before
+    require(got > 0, "first hop produced nothing")
+    let out_before = call(tout, "balance_of", [recipient])
+    require(hop(p2, z2, got, got, amount_out_min, recipient, deadline), "second hop failed")
+
+    emit Routed(caller, recipient, 2, amount_in, call(tout, "balance_of", [recipient]) - out_before)
+    return true
+  }
+
+  nonreentrant fn exact_input_three(p1: address, z1: int, p2: address, z2: int, p3: address, z3: int, amount_in: int, amount_out_min: int, recipient: address, deadline: int): bool {
+    require(require_pool(p1) && require_pool(p2) && require_pool(p3), "bad pool")
+    require(p1 != p2 && p2 != p3 && p1 != p3, "duplicate pool in route")
+    require(amount_in > 0, "zero input")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+
+    let m1 = token_out_of(p1, z1)
+    let m2 = token_out_of(p2, z2)
+    require(m1 == token_in_of(p2, z2), "route tokens do not join")
+    require(m2 == token_in_of(p3, z3), "route tokens do not join")
+    require(take(token_in_of(p1, z1), caller, amount_in), "funding failed")
+
+    let b1 = call(m1, "balance_of", [self_addr])
+    require(hop(p1, z1, amount_in, amount_in, 0, self_addr, deadline), "first hop failed")
+    let g1 = call(m1, "balance_of", [self_addr]) - b1
+    require(g1 > 0, "first hop produced nothing")
+
+    let b2 = call(m2, "balance_of", [self_addr])
+    require(hop(p2, z2, g1, g1, 0, self_addr, deadline), "second hop failed")
+    let g2 = call(m2, "balance_of", [self_addr]) - b2
+    require(g2 > 0, "second hop produced nothing")
+
+    let tout = token_out_of(p3, z3)
+    let out_before = call(tout, "balance_of", [recipient])
+    require(hop(p3, z3, g2, g2, amount_out_min, recipient, deadline), "third hop failed")
+    emit Routed(caller, recipient, 3, amount_in, call(tout, "balance_of", [recipient]) - out_before)
+    return true
+  }
+
+  // ── Exact output ─────────────────────────────────────────────────────
+  //
+  // Worked out back to front: the last hop's cost becomes the amount the hop
+  // before it must produce. Every quote is taken before any pool is touched, and
+  // a route may not reuse a pool, so no quote is invalidated by an earlier hop.
+
+  nonreentrant fn exact_output_single(p: address, dir: int, amount_out: int, amount_in_max: int, recipient: address, deadline: int): bool {
+    require(require_pool(p), "bad pool")
+    require(amount_out > 0, "zero output")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+
+    let tin = token_in_of(p, dir)
+    let need = call(p, "quote", [dir, 0 - amount_out, 0])
+    require(need > 0, "output not reachable")
+    require(need <= amount_in_max, "input above maximum")
+    require(take(tin, caller, need), "funding failed")
+    require(hop(p, dir, 0 - amount_out, need, need, recipient, deadline), "hop failed")
+    require(sweep(tin, caller), "sweep failed")
+    emit Routed(caller, recipient, 1, need, amount_out)
+    return true
+  }
+
+  nonreentrant fn exact_output_two(p1: address, z1: int, p2: address, z2: int, amount_out: int, amount_in_max: int, recipient: address, deadline: int): bool {
+    require(require_pool(p1) && require_pool(p2), "bad pool")
+    require(p1 != p2, "duplicate pool in route")
+    require(amount_out > 0, "zero output")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+
+    let tin = token_in_of(p1, z1)
+    let mid = token_out_of(p1, z1)
+    require(mid == token_in_of(p2, z2), "route tokens do not join")
+
+    let need_mid = call(p2, "quote", [z2, 0 - amount_out, 0])
+    require(need_mid > 0, "output not reachable")
+    let need_in = call(p1, "quote", [z1, 0 - need_mid, 0])
+    require(need_in > 0, "output not reachable")
+    require(need_in <= amount_in_max, "input above maximum")
+
+    require(take(tin, caller, need_in), "funding failed")
+    require(hop(p1, z1, 0 - need_mid, need_in, need_in, self_addr, deadline), "first hop failed")
+    require(hop(p2, z2, 0 - amount_out, need_mid, need_mid, recipient, deadline), "second hop failed")
+    require(sweep(tin, caller), "sweep failed")
+    require(sweep(mid, caller), "sweep failed")
+    emit Routed(caller, recipient, 2, need_in, amount_out)
+    return true
+  }
+
+  nonreentrant fn exact_output_three(p1: address, z1: int, p2: address, z2: int, p3: address, z3: int, amount_out: int, amount_in_max: int, recipient: address, deadline: int): bool {
+    require(require_pool(p1) && require_pool(p2) && require_pool(p3), "bad pool")
+    require(p1 != p2 && p2 != p3 && p1 != p3, "duplicate pool in route")
+    require(amount_out > 0, "zero output")
+    require(epoch <= deadline, "deadline passed")
+    assert_address(recipient)
+
+    let m1 = token_out_of(p1, z1)
+    let m2 = token_out_of(p2, z2)
+    require(m1 == token_in_of(p2, z2), "route tokens do not join")
+    require(m2 == token_in_of(p3, z3), "route tokens do not join")
+
+    let need_m2 = call(p3, "quote", [z3, 0 - amount_out, 0])
+    require(need_m2 > 0, "output not reachable")
+    let need_m1 = call(p2, "quote", [z2, 0 - need_m2, 0])
+    require(need_m1 > 0, "output not reachable")
+    let need_in = call(p1, "quote", [z1, 0 - need_m1, 0])
+    require(need_in > 0, "output not reachable")
+    require(need_in <= amount_in_max, "input above maximum")
+
+    require(take(token_in_of(p1, z1), caller, need_in), "funding failed")
+    require(hop(p1, z1, 0 - need_m1, need_in, need_in, self_addr, deadline), "first hop failed")
+    require(hop(p2, z2, 0 - need_m2, need_m1, need_m1, self_addr, deadline), "second hop failed")
+    require(hop(p3, z3, 0 - amount_out, need_m2, need_m2, recipient, deadline), "third hop failed")
+    require(sweep(token_in_of(p1, z1), caller), "sweep failed")
+    require(sweep(m1, caller), "sweep failed")
+    require(sweep(m2, caller), "sweep failed")
+    emit Routed(caller, recipient, 3, need_in, amount_out)
+    return true
+  }
+
+  // ── Quotes ───────────────────────────────────────────────────────────
+  //
+  // Free reads that mirror exactly what the corresponding trade would do.
+
+  view fn quote_exact_input_single(p: address, dir: int, amount_in: int): int {
+    return call(p, "quote", [dir, amount_in, 0])
+  }
+
+  view fn quote_exact_output_single(p: address, dir: int, amount_out: int): int {
+    return call(p, "quote", [dir, 0 - amount_out, 0])
+  }
+
+  view fn quote_exact_input_two(p1: address, z1: int, p2: address, z2: int, amount_in: int): int {
+    let mid = call(p1, "quote", [z1, amount_in, 0])
+    if mid <= 0 {
+      return 0
+    }
+    return call(p2, "quote", [z2, mid, 0])
+  }
+
+  view fn quote_exact_input_three(p1: address, z1: int, p2: address, z2: int, p3: address, z3: int, amount_in: int): int {
+    let m1 = call(p1, "quote", [z1, amount_in, 0])
+    if m1 <= 0 {
+      return 0
+    }
+    let m2 = call(p2, "quote", [z2, m1, 0])
+    if m2 <= 0 {
+      return 0
+    }
+    return call(p3, "quote", [z3, m2, 0])
+  }
+
+  view fn quote_exact_output_two(p1: address, z1: int, p2: address, z2: int, amount_out: int): int {
+    let need_mid = call(p2, "quote", [z2, 0 - amount_out, 0])
+    if need_mid <= 0 {
+      return 0
+    }
+    return call(p1, "quote", [z1, 0 - need_mid, 0])
+  }
+
+  view fn get_factory(): address { return self.factory }
+  view fn get_owner(): address { return self.owner }
+}

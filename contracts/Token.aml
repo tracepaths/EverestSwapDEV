@@ -1,0 +1,839 @@
+// A configurable fungible token.
+//
+// Every feature is optional and every one of them is decided once, when the
+// token is created: mintable, burnable, pausable, blacklist, a per-transaction
+// cap, a per-wallet cap, a cooldown between transfers, a transfer tax and an
+// auto-burn. A feature that was switched off at creation can never be switched
+// on later, so what a holder reads on the token is what the token will always
+// be.
+//
+// This contract is spawned rather than deployed, because a wallet cannot deploy
+// on this chain. See the Creation section for how a spawned token is set up.
+
+contract Token {
+  state {
+    name: string
+    symbol: string
+    contract_name: string
+    decimals: int
+    total_supply: int
+    max_supply: int
+    owner: address
+    pending_owner: address
+    supply_recipient: address
+
+    // Who spawned this token, and how far through its one-time setup it is.
+    // Stage 3 means settled: no setup call can ever run again.
+    spawner: address
+    setup_stage: int
+
+    balances: map[address]int
+    grants: map[address]map[address]int
+
+    // Reentrancy guard
+    locked: bool
+
+    // Feature flags (individual booleans — AML doesn't support bitwise &)
+    mintable_flag: bool
+    burnable_flag: bool
+    pausable_flag: bool
+    blacklist_flag: bool
+    max_tx_flag: bool
+    max_wallet_flag: bool
+    cooldown_flag: bool
+    tax_flag: bool
+    auto_burn_flag: bool
+    // Pause state
+    paused: bool
+
+    // Blacklist
+    blacklisted: map[address]bool
+
+    // Anti-bot
+    max_tx_amount: int
+    max_wallet_amount: int
+    cooldown_blocks: int
+    last_tx_epoch: map[address]int
+
+    // Tax
+    tax_bps: int
+    tax_recipient: address
+    tax_collected: int
+
+    // Auto-burn
+    auto_burn_bps: int
+
+    // [V7-PASS8] Trusted addresses bypass max_wallet check (e.g., pools, routers)
+    trusted_addresses: map[address]bool
+    // [AUDIT-FIX H-1] tax_exempt addresses bypass tax + auto-burn on pull/transfer_from
+    // (DEX pools/routers must move exact amounts to preserve AMM math). Set via set_tax_exempt.
+    tax_exempt: map[address]bool
+  }
+
+  // ========== Events ==========
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+  event Mint(to: address, amount: int)
+  event Burn(from: address, amount: int)
+  event Paused(status: bool)
+  event BlacklistUpdated(account: address, status: bool)
+  event MaxTxUpdated(amount: int)
+  event MaxWalletUpdated(amount: int)
+  event CooldownUpdated(seconds: int)
+  event TaxUpdated(bps: int, recipient: address)
+  event AutoBurnUpdated(bps: int)
+  event OwnershipTransferInitiated(from: address, to: address)
+  event OwnershipTransferred(from: address, to: address)
+  // [V7-PASS9] H-15: trusted address event
+  event TrustedUpdated(account: address, status: bool)
+  // [AUDIT-FIX H-1] tax exemption event
+  event TaxExemptSet(account: address, status: bool)
+
+  // ========== Creation ==========
+  // A wallet on this chain cannot deploy a contract, so a token is spawned by
+  // the launcher and configured immediately afterwards. A spawned contract's
+  // constructor receives no arguments, so everything the token needs arrives in
+  // three calls that only its spawner can make, in order, and only once each:
+  //
+  //   stage 0  configure   identity, decimals, supply, owner
+  //   stage 1  set_flags   which features this token will ever have
+  //   stage 2  set_limits  the numbers those features use
+  //   stage 3  settled; none of the three can be called again
+  //
+  // Every switch here travels as 1 or 0 rather than as a boolean, because a
+  // boolean handed from one contract to another reads as set whatever it said.
+  // Splitting the work across three calls also keeps each argument list short.
+  //
+  // The launcher runs all three inside one transaction, so a half-configured
+  // token is never left behind: if any stage fails the whole spawn is undone.
+
+  constructor() {
+    self.spawner = caller
+    self.setup_stage = 0
+    self.paused = false
+    self.locked = false
+    self.pending_owner = ""
+    self.max_supply = 0
+    self.tax_collected = 0
+  }
+
+  fn configure(
+    n: string,
+    s: string,
+    cname: string,
+    initial_supply: int,
+    dec: int,
+    initial_owner: address,
+    supply_recipient: address
+  ): bool {
+    require(caller == self.spawner, "not spawner")
+    require(self.setup_stage == 0, "already configured")
+    require(len(n) > 0, "name empty")
+    require(len(n) <= 50, "name too long")
+    require(len(s) > 0, "symbol empty")
+    require(len(s) <= 20, "symbol too long")
+    require(len(cname) <= 50, "contract_name too long")
+    require(initial_supply > 0, "supply must be positive")
+    require(dec >= 1, "decimals too low")
+    require(dec <= 18, "decimals too high")
+    assert_address(initial_owner)
+    require(initial_owner != "", "initial_owner is zero")
+    assert_address(supply_recipient)
+    require(supply_recipient != "", "supply_recipient is zero")
+
+    self.name = n
+    self.symbol = s
+    self.contract_name = cname
+    self.decimals = dec
+    self.total_supply = initial_supply
+    self.owner = initial_owner
+    self.supply_recipient = supply_recipient
+    self.balances[supply_recipient] = initial_supply
+    self.setup_stage = 1
+
+    emit Mint(supply_recipient, initial_supply)
+    emit Transfer("", supply_recipient, initial_supply)
+    return true
+  }
+
+  // Which features exist at all. None of these can be changed afterwards: a
+  // token that cannot mint must stay unable to mint, or the promise is worth
+  // nothing.
+  fn set_flags(
+    mint_f: int,
+    burn_f: int,
+    pause_f: int,
+    black_f: int,
+    maxtx_f: int,
+    maxwallet_f: int,
+    cool_f: int,
+    tax_f: int,
+    autoburn_f: int
+  ): bool {
+    require(caller == self.spawner, "not spawner")
+    require(self.setup_stage == 1, "flags already set")
+    self.mintable_flag = mint_f == 1
+    self.burnable_flag = burn_f == 1
+    self.pausable_flag = pause_f == 1
+    self.blacklist_flag = black_f == 1
+    self.max_tx_flag = maxtx_f == 1
+    self.max_wallet_flag = maxwallet_f == 1
+    self.cooldown_flag = cool_f == 1
+    self.tax_flag = tax_f == 1
+    self.auto_burn_flag = autoburn_f == 1
+    self.setup_stage = 2
+    return true
+  }
+
+  // The numbers the enabled features use. A feature that is switched on must be
+  // given a usable number here, so a token cannot be launched claiming a limit
+  // it has not actually set.
+  fn set_limits(
+    max_tx: int,
+    max_wallet: int,
+    cooldown: int,
+    tax: int,
+    tax_to: address,
+    burn_bps: int
+  ): bool {
+    require(caller == self.spawner, "not spawner")
+    require(self.setup_stage == 2, "limits already set")
+    require(max_tx >= 0, "max_tx negative")
+    require(max_wallet >= 0, "max_wallet negative")
+    require(cooldown >= 0, "cooldown negative")
+    require(cooldown <= 1000, "cooldown > 1000 blocks")
+    require(tax >= 0, "tax negative")
+    require(tax <= 2500, "tax > 25%")
+    require(burn_bps >= 0, "auto_burn negative")
+    require(burn_bps <= 1000, "auto_burn > 10%")
+    require(tax + burn_bps <= 2500, "total fees > 25%")
+    if self.max_tx_flag { require(max_tx > 0, "max_tx must be > 0") }
+    if self.max_wallet_flag { require(max_wallet > 0, "max_wallet must be > 0") }
+    if self.cooldown_flag { require(cooldown > 0, "cooldown must be > 0") }
+    if self.tax_flag {
+      assert_address(tax_to)
+      require(tax_to != "", "tax_recipient is zero")
+    }
+
+    self.max_tx_amount = max_tx
+    self.max_wallet_amount = max_wallet
+    self.cooldown_blocks = cooldown
+    self.tax_bps = tax
+    self.tax_recipient = tax_to
+    self.auto_burn_bps = burn_bps
+    self.setup_stage = 3
+    return true
+  }
+
+  view fn get_setup_stage(): int { return self.setup_stage }
+  view fn get_spawner(): address { return self.spawner }
+
+
+  // ========== View Functions ==========
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
+  view fn allowance(owner_addr: address, spender: address): int {
+    return self.grants[owner_addr][spender]
+  }
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn get_max_supply(): int { return self.max_supply }
+  view fn get_owner(): address { return self.owner }
+  view fn get_pending_owner(): address { return self.pending_owner }
+  view fn get_supply_recipient(): address { return self.supply_recipient }
+  view fn get_contract_name(): string { return self.contract_name }
+  view fn is_paused(): bool { return self.paused }
+  view fn is_blacklisted(addr: address): bool { return self.blacklisted[addr] }
+  view fn get_max_tx_amount(): int { return self.max_tx_amount }
+  view fn get_max_wallet_amount(): int { return self.max_wallet_amount }
+  view fn get_cooldown_blocks(): int { return self.cooldown_blocks }
+  view fn get_tax_bps(): int { return self.tax_bps }
+  view fn get_tax_recipient(): address { return self.tax_recipient }
+  view fn get_auto_burn_bps(): int { return self.auto_burn_bps }
+  view fn get_tax_collected(): int { return self.tax_collected }
+  view fn is_trusted(addr: address): bool { return self.trusted_addresses[addr] }
+  view fn is_mintable(): bool { return self.mintable_flag }
+  view fn is_burnable(): bool { return self.burnable_flag }
+  view fn is_pausable_enabled(): bool { return self.pausable_flag }
+  view fn is_blacklist_enabled(): bool { return self.blacklist_flag }
+  view fn is_max_tx_enabled(): bool { return self.max_tx_flag }
+  view fn is_max_wallet_enabled(): bool { return self.max_wallet_flag }
+  view fn is_cooldown_enabled(): bool { return self.cooldown_flag }
+  view fn is_tax_enabled(): bool { return self.tax_flag }
+  view fn is_auto_burn_enabled(): bool { return self.auto_burn_flag }
+
+  // ========== Core Transfer ==========
+  // [V7-PASS8] C-1 fix: cooldown updated in pull/transfer_from too
+  // [V7-PASS8] C-2 fix: explicit overflow guards on amt * bps
+  // [V7-PASS8] C-5 fix: cooldown check skipped when last == 0 (sentinel)
+  // [V7-PASS8] C-6 fix: max_wallet check moved to top (true CEI)
+  // [V7-PASS8] C-7 fix: skip tax addition when to == tax_recipient (double-count)
+  // [V7-PASS8] H-3 fix: pause also gates grant/mint/burn
+  // [V7-PASS8] H-7 fix: balance overflow checks
+  // [V7-PASS8] H-9 fix: trusted_addresses bypass max_wallet (pools can accumulate)
+  // [V7-PASS8] L-1 fix: reentrancy guard on all mutators
+  fn transfer(to: address, amt: int): bool {
+    assert_address(to)
+    require(to != "", "transfer to zero address")
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[caller], "sender blacklisted")
+    require(!self.blacklisted[to], "recipient blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[caller]
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
+    }
+
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+
+    // Fees: auto-burn first, then tax. Integers here are arbitrary precision, so
+    // the product cannot overflow and needs no ceiling on the amount.
+    //
+    // An exempt sender pays neither. That is what makes a pool workable: a pool
+    // pays a trader with transfer(), and if the payout were taxed the pool would
+    // hand over less than it promised and its own books would drift.
+    let burn_fee = 0
+    let tax_fee = 0
+    if !self.tax_exempt[caller] {
+      if self.auto_burn_flag && self.auto_burn_bps > 0 {
+        burn_fee = amt * self.auto_burn_bps / 10000
+      }
+      // [AUDIT-FIX C-3] When to == tax_recipient, skip tax fee entirely to avoid
+      // silent burn (sender loses tax_fee but no one receives it).
+      if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+        tax_fee = amt * self.tax_bps / 10000
+      }
+    }
+    let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
+    let net = amt - total_fee
+
+    // Max-wallet pre-check (CEI: checks before effects)
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects (state mutations)
+    self.balances[caller] = bal - amt
+
+    if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(caller, burn_fee)
+    }
+
+    if tax_fee > 0 {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+
+    let new_recipient_bal = self.balances[to] + net
+    require(new_recipient_bal > self.balances[to], "recipient overflow")
+    self.balances[to] = new_recipient_bal
+
+    if self.cooldown_flag {
+      self.last_tx_epoch[caller] = epoch
+    }
+
+    if total_fee > 0 {
+      emit Transfer(caller, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(caller, "", burn_fee)
+      }
+    }
+    emit Transfer(caller, to, net)
+
+    self.locked = false
+    return true
+  }
+
+  fn grant(spender: address, amt: int): bool {
+    assert_address(spender)
+    require(spender != "", "grant to zero address")
+    // [V7-PASS8] L-12 fix: blacklist check on spender
+    if self.blacklist_flag { require(!self.blacklisted[spender], "spender blacklisted") }
+    // [V7-PASS8] H-3 fix: grant gated by pause
+    require(!self.paused, "paused")
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  fn pull(from: address, to: address, amt: int): bool {
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[from], "from blacklisted")
+    require(!self.blacklisted[to], "to blacklisted")
+    // [AUDIT-FIX H-1] Also check the spender (caller) against the blacklist
+    require(!self.blacklisted[caller], "caller blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[from]
+      // [V7-PASS8] C-1 fix: update cooldown on pull (not just transfer)
+      // [V7-PASS8] C-5 fix: skip when last == 0 (first-tx sentinel)
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
+    }
+
+    // [AUDIT-FIX M-5] Reentrancy guard (parity with transfer)
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+
+    // [AUDIT-FIX H-1] Apply tax + auto-burn unless the caller is tax_exempt.
+    // DEX pools/routers (tax_exempt) move exact amounts to preserve AMM math;
+    // regular spender-initiated pulls now pay tax, closing the transfer() bypass.
+    let burn_fee = 0
+    let tax_fee = 0
+    if !self.tax_exempt[caller] {
+      if self.auto_burn_flag && self.auto_burn_bps > 0 {
+        burn_fee = amt * self.auto_burn_bps / 10000
+      }
+      if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+        tax_fee = amt * self.tax_bps / 10000
+      }
+    }
+    let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
+    let net = amt - total_fee
+
+    // [AUDIT-FIX H-1] max_wallet on recipient (parity with transfer), unless trusted
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects
+    self.balances[from] = bal - amt
+    if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(from, burn_fee)
+    }
+    if tax_fee > 0 {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+    let new_to_bal = self.balances[to] + net
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
+    self.grants[from][caller] = allowed - amt
+
+    // [V7-PASS8] C-1 fix: write cooldown for `from` (the actual rate-limited party)
+    if self.cooldown_flag {
+      self.last_tx_epoch[from] = epoch
+    }
+
+    if total_fee > 0 {
+      emit Transfer(from, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(from, "", burn_fee)
+      }
+    }
+    emit Transfer(from, to, net)
+
+    self.locked = false
+    return true
+  }
+
+  fn transfer_from(from: address, to: address, amt: int): bool {
+    assert_address(to)
+    require(amt > 0, "amount must be positive")
+    require(!self.paused, "paused")
+    require(!self.blacklisted[from], "from blacklisted")
+    require(!self.blacklisted[to], "to blacklisted")
+    // [AUDIT-FIX H-1] Also check the spender (caller) against the blacklist
+    require(!self.blacklisted[caller], "caller blacklisted")
+    if self.max_tx_flag {
+      require(amt <= self.max_tx_amount, "exceeds max tx")
+    }
+    if self.cooldown_flag {
+      let last = self.last_tx_epoch[from]
+      // [V7-PASS8] C-1 fix: update cooldown on transfer_from
+      if last > 0 {
+        require(epoch >= last + self.cooldown_blocks, "cooldown active")
+      }
+    }
+
+    // [AUDIT-FIX M-5] Reentrancy guard (parity with transfer)
+    require(!self.locked, "reentrant call")
+    self.locked = true
+
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+
+    // [AUDIT-FIX H-1] Apply tax + auto-burn unless the caller is tax_exempt (see pull).
+    let burn_fee = 0
+    let tax_fee = 0
+    if !self.tax_exempt[caller] {
+      if self.auto_burn_flag && self.auto_burn_bps > 0 {
+        burn_fee = amt * self.auto_burn_bps / 10000
+      }
+      if self.tax_flag && self.tax_bps > 0 && to != self.tax_recipient {
+        tax_fee = amt * self.tax_bps / 10000
+      }
+    }
+    let total_fee = burn_fee + tax_fee
+    require(total_fee <= amt, "fees exceed amount")
+    let net = amt - total_fee
+
+    // [AUDIT-FIX H-1] max_wallet on recipient (parity with transfer), unless trusted
+    if self.max_wallet_flag && !self.trusted_addresses[to] {
+      let recipient_bal_after = self.balances[to] + net
+      require(recipient_bal_after <= self.max_wallet_amount, "exceeds max wallet")
+    }
+
+    // Effects
+    self.balances[from] = bal - amt
+    if burn_fee > 0 {
+      require(self.total_supply >= burn_fee, "supply underflow")
+      self.total_supply = self.total_supply - burn_fee
+      emit Burn(from, burn_fee)
+    }
+    if tax_fee > 0 {
+      let new_tax_bal = self.balances[self.tax_recipient] + tax_fee
+      require(new_tax_bal > self.balances[self.tax_recipient], "tax bal overflow")
+      self.balances[self.tax_recipient] = new_tax_bal
+      self.tax_collected = self.tax_collected + tax_fee
+    }
+    let new_to_bal = self.balances[to] + net
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
+    self.grants[from][caller] = allowed - amt
+
+    if self.cooldown_flag {
+      self.last_tx_epoch[from] = epoch
+    }
+
+    if total_fee > 0 {
+      emit Transfer(from, self.tax_recipient, tax_fee)
+      if burn_fee > 0 {
+        emit Transfer(from, "", burn_fee)
+      }
+    }
+    emit Transfer(from, to, net)
+
+    self.locked = false
+    return true
+  }
+
+  // ========== Admin: Mint ==========
+  // [V7-PASS8] H-3 fix: mint gated by pause
+  // [V7-PASS8] H-5 fix: mint to zero address blocked
+  // [V7-PASS8] H-6 fix: supply overflow check
+  fn mint(to: address, amt: int): bool {
+    require(self.mintable_flag, "mintable disabled")
+    require(caller == self.owner, "not owner")
+    require(!self.paused, "paused")
+    assert_address(to)
+    require(to != "", "mint to zero address")
+    require(amt > 0, "amount must be positive")
+    let new_supply = self.total_supply + amt
+    require(new_supply > self.total_supply, "supply overflow")
+    if self.max_supply > 0 {
+      require(new_supply <= self.max_supply, "exceeds max supply")
+    }
+    let new_bal = self.balances[to] + amt
+    require(new_bal > self.balances[to], "bal overflow")
+    self.balances[to] = new_bal
+    self.total_supply = new_supply
+    emit Mint(to, amt)
+    emit Transfer("", to, amt)
+    return true
+  }
+
+  // ========== Admin: Max Supply Cap ==========
+  // [AUDIT-FIX F-5] Owner can raise the hard cap. Can only increase (never lower)
+  // and must stay >= current total_supply. Makes the mint() max_supply guard live.
+  fn set_max_supply(cap: int): bool {
+    require(self.mintable_flag, "mintable disabled")
+    require(caller == self.owner, "not owner")
+    require(cap >= self.total_supply, "cap below current supply")
+    self.max_supply = cap
+    return true
+  }
+
+  // ========== Admin: Burn ==========
+  fn burn_from(from: address, amt: int): bool {
+    require(self.burnable_flag, "burnable disabled")
+    require(caller == self.owner, "not owner")
+    require(!self.paused, "paused")
+    if self.blacklist_flag { require(!self.blacklisted[from], "from blacklisted") }
+    assert_address(from)
+    require(from != "", "burn from zero")
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    require(self.total_supply >= amt, "supply underflow")
+    self.balances[from] = bal - amt
+    self.total_supply = self.total_supply - amt
+    emit Burn(from, amt)
+    emit Transfer(from, "", amt)
+    return true
+  }
+
+  fn burn(amt: int): bool {
+    require(self.burnable_flag, "burnable disabled")
+    require(!self.paused, "paused")
+    require(amt > 0, "amount must be positive")
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    require(self.total_supply >= amt, "supply underflow")
+    self.balances[caller] = bal - amt
+    self.total_supply = self.total_supply - amt
+    emit Burn(caller, amt)
+    emit Transfer(caller, "", amt)
+    return true
+  }
+
+  // ========== Admin: Pause ==========
+  fn set_paused(p: bool): bool {
+    require(self.pausable_flag, "pausable disabled")
+    require(caller == self.owner, "not owner")
+    self.paused = p
+    emit Paused(p)
+    return true
+  }
+
+  // ========== Admin: Blacklist ==========
+  fn set_blacklist(account: address, status: bool): bool {
+    require(self.blacklist_flag, "blacklist disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    require(account != "", "blacklist zero")
+    self.blacklisted[account] = status
+    emit BlacklistUpdated(account, status)
+    return true
+  }
+
+  // ========== Admin: Trusted Addresses (bypass max_wallet) ==========
+  // [V7-PASS8] NEW: allow pools/routers to bypass max_wallet check
+  // [V7-PASS9] H-15: emit TrustedUpdated event
+  fn set_trusted(account: address, status: bool): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    require(account != "", "trusted zero")
+    self.trusted_addresses[account] = status
+    emit TrustedUpdated(account, status)
+    return true
+  }
+
+  // [AUDIT-FIX H-1] Tax exemption: pools/routers marked tax_exempt move tokens
+  // via pull/transfer_from without tax + auto-burn so AMM math stays exact.
+  // Regular spender-initiated pulls pay tax, closing the transfer() bypass.
+  fn set_tax_exempt(account: address, status: bool): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(account)
+    require(account != "", "tax_exempt zero")
+    self.tax_exempt[account] = status
+    emit TaxExemptSet(account, status)
+    return true
+  }
+
+  // The exchange needs three of its contracts to move exact amounts and to hold
+  // more than one wallet's worth: the pool, the position manager, and the router.
+  // Marking them one at a time takes six transactions and it is easy to forget
+  // one, which shows up later as a swap that reverts for no visible reason. This
+  // does all six in a single call.
+  //
+  // It grants nothing but those two exemptions, and it can be undone one address
+  // at a time with set_trusted and set_tax_exempt.
+  fn set_infrastructure(pool: address, manager: address, router: address): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(pool)
+    assert_address(manager)
+    assert_address(router)
+    require(pool != "", "pool zero")
+    require(manager != "", "manager zero")
+    require(router != "", "router zero")
+    self.trusted_addresses[pool] = true
+    self.trusted_addresses[manager] = true
+    self.trusted_addresses[router] = true
+    self.tax_exempt[pool] = true
+    self.tax_exempt[manager] = true
+    self.tax_exempt[router] = true
+    emit TrustedUpdated(pool, true)
+    emit TrustedUpdated(manager, true)
+    emit TrustedUpdated(router, true)
+    emit TaxExemptSet(pool, true)
+    emit TaxExemptSet(manager, true)
+    emit TaxExemptSet(router, true)
+    return true
+  }
+
+  // [V7-PASS9] H-15: get_trusted_count helper
+  // [BUGFIX] Updated comment to clearly document this is a placeholder.
+  // AML doesn't support dynamic list tracking efficiently. Callers should use
+  // TrustedUpdated events to track trusted address count off-chain.
+  view fn get_trusted_count(): int {
+    // PLACEHOLDER: Always returns 0. Use TrustedUpdated events for actual count.
+    return 0
+  }
+
+  // ========== Admin: Anti-bot ==========
+  fn set_max_tx_amount(amt: int): bool {
+    require(self.max_tx_flag, "max_tx disabled")
+    require(caller == self.owner, "not owner")
+    require(amt > 0, "amount must be positive")
+    self.max_tx_amount = amt
+    emit MaxTxUpdated(amt)
+    return true
+  }
+
+  fn set_max_wallet_amount(amt: int): bool {
+    require(self.max_wallet_flag, "max_wallet disabled")
+    require(caller == self.owner, "not owner")
+    require(amt > 0, "amount must be positive")
+    self.max_wallet_amount = amt
+    emit MaxWalletUpdated(amt)
+    return true
+  }
+
+  fn set_cooldown_blocks(blocks: int): bool {
+    require(self.cooldown_flag, "cooldown disabled")
+    require(caller == self.owner, "not owner")
+    require(blocks > 0, "cooldown must be positive")
+    require(blocks <= 1000, "cooldown too long")
+    self.cooldown_blocks = blocks
+    emit CooldownUpdated(blocks)
+    return true
+  }
+
+  // ========== Admin: Tax ==========
+  fn set_tax_bps(bps: int): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    require(bps >= 0, "tax negative")
+    require(bps <= 2500, "tax > 25%")
+    require(bps + self.auto_burn_bps <= 2500, "total fees > 25%")
+    self.tax_bps = bps
+    emit TaxUpdated(bps, self.tax_recipient)
+    return true
+  }
+
+  fn set_tax_recipient(recipient: address): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(recipient)
+    require(recipient != "", "tax recipient zero")
+    require(recipient != self.tax_recipient, "same recipient")
+    // [AUDIT-FIX F-4] Move the old recipient's accumulated tax balance into the new
+    // recipient and reset the cumulative counter, so withdraw_tax() accounting stays
+    // consistent and no tax is stranded in the previous recipient's balance.
+    let old_recipient = self.tax_recipient
+    let old_bal = self.balances[old_recipient]
+    if old_bal > 0 {
+      self.balances[old_recipient] = 0
+      let new_bal = self.balances[recipient] + old_bal
+      require(new_bal > self.balances[recipient], "tax bal overflow")
+      self.balances[recipient] = new_bal
+      emit Transfer(old_recipient, recipient, old_bal)
+    }
+    self.tax_recipient = recipient
+    self.tax_collected = 0
+    emit TaxUpdated(self.tax_bps, recipient)
+    return true
+  }
+
+  fn withdraw_tax(to: address): bool {
+    require(self.tax_flag, "tax disabled")
+    require(caller == self.owner, "not owner")
+    assert_address(to)
+    require(to != "", "withdraw to zero")
+    // [SECURITY] MEDIUM-6: Add reentrancy guard for consistency with other state-changing functions
+    require(!self.locked, "reentrant call")
+    self.locked = true
+    let collected = self.tax_collected
+    require(collected > 0, "no tax to withdraw")
+    let bal = self.balances[self.tax_recipient]
+    require(bal >= collected, "insufficient tax balance")
+    self.balances[self.tax_recipient] = bal - collected
+    let new_to_bal = self.balances[to] + collected
+    require(new_to_bal > self.balances[to], "to overflow")
+    self.balances[to] = new_to_bal
+    self.tax_collected = 0
+    emit Transfer(self.tax_recipient, to, collected)
+    self.locked = false
+    return true
+  }
+
+  // ========== Admin: Auto-burn ==========
+  fn set_auto_burn_bps(bps: int): bool {
+    require(self.auto_burn_flag, "auto_burn disabled")
+    require(caller == self.owner, "not owner")
+    require(bps >= 0, "auto_burn negative")
+    require(bps <= 1000, "auto_burn > 10%")
+    require(self.tax_bps + bps <= 2500, "total fees > 25%")
+    self.auto_burn_bps = bps
+    emit AutoBurnUpdated(bps)
+    return true
+  }
+
+  // [AUDIT-FIX H-5] Reentrancy guard added to all ownership functions
+  // ========== Admin: Ownership (2-step) ==========
+  fn transfer_ownership(new_owner: address): bool {
+    require(caller == self.owner, "not owner")
+    require(!self.locked, "reentrant call")
+    self.locked = true
+    assert_address(new_owner)
+    // [V7-PASS8] C-3 fix: reject zero address
+    require(new_owner != "", "new owner is zero")
+    require(new_owner != self.owner, "already owner")
+    self.pending_owner = new_owner
+    self.locked = false
+    emit OwnershipTransferInitiated(self.owner, new_owner)
+    return true
+  }
+
+  fn accept_ownership(): bool {
+    require(!self.locked, "reentrant call")
+    self.locked = true
+    // [V7-PASS8] H-3 fix: guard against zero pending_owner
+    require(self.pending_owner != "", "no pending transfer")
+    require(caller == self.pending_owner, "not pending owner")
+    let old_owner = self.owner
+    self.owner = self.pending_owner
+    self.pending_owner = ""
+    self.locked = false
+    emit OwnershipTransferred(old_owner, self.owner)
+    return true
+  }
+
+  fn renounce_ownership(): bool {
+    require(caller == self.owner, "not owner")
+    require(!self.locked, "reentrant call")
+    self.locked = true
+    // [V7-PASS8] M-5 fix: warn before irreversible renounce
+    require(!self.paused, "cannot renounce while paused")
+    let old_owner = self.owner
+    self.owner = ""
+    self.locked = false
+    emit OwnershipTransferred(old_owner, "")
+    return true
+  }
+}

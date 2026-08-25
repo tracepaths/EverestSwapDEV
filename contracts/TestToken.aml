@@ -1,0 +1,84 @@
+// A plain OCS01 token for exercising the exchange on devnet.
+//
+// The constructor takes no arguments because a top-level deployment cannot carry
+// any: the whole supply goes to whoever deploys it, and the name and symbol are
+// set once afterwards so two deployments of the same bytecode can differ.
+
+contract TestToken {
+  state {
+    name: string
+    symbol: string
+    decimals: int
+    total_supply: int
+    owner: address
+    labeled: bool
+    balances: map[address]int
+    grants: map[address]map[address]int
+  }
+
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+
+  constructor() {
+    self.owner = caller
+    self.decimals = 18
+    self.total_supply = 1000000000000000000000000000
+    self.balances[caller] = self.total_supply
+    self.name = "Test Token"
+    self.symbol = "TEST"
+    self.labeled = false
+  }
+
+  fn label(n: string, s: string): bool {
+    require(caller == self.owner, "not owner")
+    require(!self.labeled, "already labeled")
+    self.name = n
+    self.symbol = s
+    self.labeled = true
+    return true
+  }
+
+  fn transfer(to: address, amount: int): bool {
+    assert_address(to)
+    require(amount > 0, "zero amount")
+    require(self.balances[caller] >= amount, "insufficient balance")
+    self.balances[caller] -= amount
+    self.balances[to] += amount
+    emit Transfer(caller, to, amount)
+    return true
+  }
+
+  fn grant(spender: address, amount: int): bool {
+    assert_address(spender)
+    require(amount >= 0, "negative amount")
+    self.grants[caller][spender] = amount
+    emit Grant(caller, spender, amount)
+    return true
+  }
+
+  fn pull(from: address, to: address, amount: int): bool {
+    assert_address(from)
+    assert_address(to)
+    require(amount > 0, "zero amount")
+    require(self.grants[from][caller] >= amount, "insufficient allowance")
+    require(self.balances[from] >= amount, "insufficient balance")
+    self.grants[from][caller] -= amount
+    self.balances[from] -= amount
+    self.balances[to] += amount
+    emit Transfer(from, to, amount)
+    return true
+  }
+
+  fn transfer_from(from: address, to: address, amount: int): bool {
+    return pull(from, to, amount)
+  }
+
+  view fn balance_of(who: address): int { return self.balances[who] }
+  view fn allowance(who: address, spender: address): int { return self.grants[who][spender] }
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_decimals(): int { return self.decimals }
+  view fn decimals(): int { return self.decimals }
+  view fn get_total_supply(): int { return self.total_supply }
+  view fn get_owner(): address { return self.owner }
+}

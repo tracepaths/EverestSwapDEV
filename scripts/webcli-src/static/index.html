@@ -1,0 +1,572 @@
+<!--
+    This file is part of Octra Wallet (webcli).
+
+    Octra Wallet is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    Octra Wallet is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Octra Wallet.  If not, see <http://www.gnu.org/licenses/>.
+
+    This program is released under the GPL with the additional exemption
+    that compiling, linking, and/or using OpenSSL is allowed.
+    You are free to remove this exemption from derived works.
+
+    Copyright 2025-2026 Octra Labs
+              2025-2026 David A.
+              2025-2026 Alex T.
+              2025-2026 Vadim S.
+              2025-2026 Julia L.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>octra_wallet</title>
+<link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+<div id="modal-overlay" style="display:none">
+  <div id="modal-box">
+    <div id="modal-title">octra_wallet</div>
+    <div id="modal-sub">no wallet found</div>
+    <div id="modal-btns">
+      <button class="action-btn" data-action="modalShowImport">import</button>
+      <button class="action-btn" data-action="modalCreate">create new</button>
+    </div>
+    <div id="modal-import" style="display:none">
+      <div class="import-tabs">
+        <a href="#" class="import-tab active" data-action="switchImportTab" data-arg="seed" data-prevent="1">seed phrase</a>
+        <a href="#" class="import-tab" data-action="switchImportTab" data-arg="key" data-prevent="1">private key</a>
+      </div>
+      <div id="import-seed">
+        <div class="form-row">
+          <label>12-word seed phrase</label>
+          <textarea id="modal-mnemonic" rows="3" placeholder="word1 word2 word3 ... word12" spellcheck="false" autocomplete="off"></textarea>
+        </div>
+      </div>
+      <div id="import-key" style="display:none">
+        <div class="form-row">
+          <label>private key (base64)</label>
+          <textarea id="modal-privkey" rows="3" placeholder="paste base64 private key..."></textarea>
+        </div>
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="modalDoImport">import</button>
+        <button class="action-btn" style="background:#8C9DB6" data-action="modalBack">back</button>
+      </div>
+    </div>
+    <div id="modal-mnemonic-show" style="display:none">
+      <div class="mnemonic-warning">write down your seed phrase - it cannot be recovered</div>
+      <div id="mnemonic-words" class="mnemonic-grid"></div>
+      <div class="form-row" style="margin-top:12px;text-align:center">
+        <label>
+          <input type="checkbox" id="mnemonic-confirm-check"> i have saved my seed phrase
+        </label>
+      </div>
+      <div class="action-row">
+        <button class="action-btn" id="mnemonic-continue-btn" data-action="modalMnemonicDone" disabled>continue</button>
+      </div>
+    </div>
+    <div id="modal-pin" style="display:none">
+      <div class="form-row">
+        <label id="modal-pin-label">enter PIN to unlock</label>
+        <input type="password" id="modal-pin-input" maxlength="64" placeholder="••••••••••••" autocomplete="current-password">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="modalUnlock">unlock</button>
+        <button class="action-btn" id="pin-back-btn" style="background:#8C9DB6;display:none" data-action="modalBackFromPin">back</button>
+      </div>
+    </div>
+    <div id="modal-pin-setup" style="display:none">
+      <form data-nosubmit>
+      <input type="text" autocomplete="username" value="octra-wallet" readonly aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+      <div class="form-row">
+        <label>create PIN</label>
+        <input type="password" id="modal-pin-new" maxlength="64" placeholder="••••••••••••" autocomplete="new-password" passwordrules="minlength: 15;">
+      </div>
+      <div class="form-row">
+        <label>confirm PIN</label>
+        <input type="password" id="modal-pin-confirm" maxlength="64" placeholder="••••••••••••" autocomplete="new-password" passwordrules="minlength: 15;">
+      </div>
+      <div class="form-row" style="font-size:11px;color:#8C9DB6;line-height:1.4">
+        PIN must be at least 8 characters. 15 or more recommended; your password manager can generate a strong one.
+      </div>
+      <div class="action-row">
+        <button type="button" class="action-btn" data-action="modalFinishSetup">set PIN</button>
+        <button type="button" class="action-btn" style="background:#8C9DB6" data-action="modalBackFromPin">back</button>
+      </div>
+      </form>
+    </div>
+    <div id="modal-result"></div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<header>
+  <div class="left">
+    <div class="title">octra_wallet</div>
+    <div class="subtitle" id="hdr-addr">loading...</div>
+  </div>
+  <div class="hdr-right-group">
+    <div class="right" id="hdr-status">connecting...</div>
+    <button class="right logout-btn" id="hdr-circles" data-action="navTo" data-arg="circles.html" style="display:none">circles</button>
+    <button class="right logout-btn" id="hdr-apps" data-action="switchView" data-arg="apps" style="display:none">apps</button>
+    <button class="right logout-btn" id="hdr-dev" data-action="switchView" data-arg="dev" style="display:none">dev tools</button>
+    <button class="right logout-btn" id="hdr-logout" data-action="doLogout" style="display:none">logout</button>
+  </div>
+</header>
+
+<div class="nav-tabs">
+  <a href="#" class="active" data-view="dashboard" data-action="switchView" data-arg="dashboard" data-prevent="1">dashboard</a>
+  <a href="#" data-view="send" data-action="switchView" data-arg="send" data-prevent="1">send</a>
+  <a href="#" data-view="encrypt" data-action="switchView" data-arg="encrypt" data-prevent="1">encryption</a>
+  <a href="#" data-view="stealth" data-action="switchView" data-arg="stealth" data-prevent="1">stealth <span id="stealth-badge" class="badge" style="display:none"></span></a>
+  <a href="#" data-view="tokens" data-action="switchView" data-arg="tokens" data-prevent="1">tokens</a>
+  <a href="#" data-view="history" data-action="switchView" data-arg="history" data-prevent="1">history</a>
+  <a href="#" data-view="keys" data-action="switchView" data-arg="keys" data-prevent="1">keys</a>
+  <a href="#" data-view="settings" data-action="switchView" data-arg="settings" data-prevent="1">settings</a>
+</div>
+
+<div class="content-area">
+
+  <div class="view active" id="view-dashboard">
+    <div class="stats-row">
+      <div class="stat-box"><div class="label">public balance</div><div class="value" id="st-balance">-</div></div>
+      <div class="stat-box"><div class="label">encrypted balance</div><div class="value" id="st-enc-balance">-</div><a href="#" id="btn-key-switch" style="display:none;text-align:center;font-size:11px" data-action="doKeySwitch" data-prevent="1">key switch required</a></div>
+      <div class="stat-box"><div class="label">nonce</div><div class="value" id="st-nonce">-</div></div>
+      <div class="stat-box"><div class="label">staging</div><div class="value" id="st-staging">-</div></div>
+    </div>
+    <div class="section">
+      <div class="section-title">recent transactions (<span id="dash-tx-count">0</span>)</div>
+      <div id="dash-txs"><div class="loading">loading...</div></div>
+      <div id="dash-more"></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-send">
+    <div class="balance-strip">
+      <span class="bal-label">available:</span> <span id="send-bal" class="mono">-</span>
+    </div>
+    <div class="section-title">send oct</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>recipient address</label>
+        <input type="text" id="send-to" placeholder="oct...">
+      </div>
+      <div class="form-row">
+        <label>amount (oct)</label>
+        <input type="text" id="send-amount" placeholder="0.000000">
+      </div>
+      <div class="form-row">
+        <label>message (optional)</label>
+        <input type="text" id="send-msg" placeholder="">
+      </div>
+      <div class="form-row">
+        <label>fee (ou) - recommended by default</label>
+        <input type="text" id="send-fee" placeholder="...">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doSend">send</button>
+      </div>
+      <div id="send-result"></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-encrypt">
+    <div class="balance-strip">
+      <span class="bal-label">public balance:</span> <span id="enc-pub-bal" class="mono">-</span>
+      <span class="bal-sep">|</span>
+      <span class="bal-label">encrypted balance:</span> <span id="enc-enc-bal" class="mono">-</span>
+    </div>
+    <div class="form-split">
+      <div class="form-panel">
+        <div class="form-panel-title">encrypt</div>
+        <div class="form-row">
+          <label>amount to encrypt (oct)</label>
+          <input type="text" id="enc-amount" placeholder="0.000000">
+        </div>
+        <div class="form-row">
+          <label>fee (ou) - recommended by default</label>
+          <input type="text" id="enc-fee" placeholder="...">
+        </div>
+        <div class="action-row">
+          <button class="action-btn" data-action="doEncrypt">encrypt</button>
+        </div>
+        <div id="enc-result"></div>
+      </div>
+      <div class="form-panel">
+        <div class="form-panel-title">decrypt</div>
+        <div class="form-row">
+          <label>amount to decrypt (oct)</label>
+          <input type="text" id="dec-amount" placeholder="0.000000">
+        </div>
+        <div class="form-row">
+          <label>fee (ou) - recommended by default</label>
+          <input type="text" id="dec-fee" placeholder="...">
+        </div>
+        <div class="action-row">
+          <button class="action-btn" data-action="doDecrypt">decrypt</button>
+        </div>
+        <div id="dec-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-stealth">
+    <div class="balance-strip">
+      <span class="bal-label">encrypted balance:</span> <span id="st-enc-bal-info" class="mono">-</span>
+    </div>
+    <div class="section-title">stealth send</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>recipient address</label>
+        <input type="text" id="stealth-to" placeholder="oct...">
+      </div>
+      <div class="form-row">
+        <label>amount (oct)</label>
+        <input type="text" id="stealth-amount" placeholder="0.000000">
+      </div>
+      <div class="form-row">
+        <label>fee (ou) - recommended by default</label>
+        <input type="text" id="stealth-fee" placeholder="...">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doStealthSend">stealth send</button>
+      </div>
+    </div>
+    <div class="section-title">stealth outputs</div>
+    <div class="action-row" style="padding:8px 10px">
+      <button class="action-btn" data-action="doStealthScan">scan</button>
+    </div>
+    <div class="stealth-outputs-area">
+      <div id="stealth-outputs"><div class="staging-empty">no outputs scanned yet</div></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-tokens">
+    <div class="balance-strip">
+      <span class="bal-label">tokens:</span> <span id="tok-count" class="mono">-</span>
+    </div>
+    <div class="section-title">your tokens</div>
+    <div id="tok-list"><div class="loading">loading tokens...</div></div>
+
+    <div id="tok-transfer" style="display:none">
+      <div class="section-title">transfer <span id="tok-transfer-sym"></span></div>
+      <div class="form-area">
+        <div class="form-row">
+          <label>recipient</label>
+          <input type="text" id="tok-to" placeholder="oct...">
+        </div>
+        <div class="form-row">
+          <label>amount</label>
+          <input type="text" id="tok-amount" placeholder="0">
+        </div>
+        <div class="form-row">
+          <label>fee (ou) - recommended by default</label>
+          <input type="text" id="tok-fee" placeholder="...">
+        </div>
+        <div class="action-row">
+          <button class="action-btn" data-action="doTokenTransfer">send</button>
+          <button class="action-btn" style="background:#8C9DB6" data-action="closeTokenTransfer">cancel</button>
+        </div>
+        <div id="tok-transfer-result"></div>
+      </div>
+    </div>
+
+    <div class="section-title">token transactions (<span id="tok-tx-count">0</span> / <span id="tok-tx-total">0</span>, in <span id="tok-tx-in">0</span>, out <span id="tok-tx-out">0</span>)</div>
+    <div id="tok-txs"><div class="loading">loading token transactions...</div></div>
+  </div>
+
+  <div class="view" id="view-apps">
+    <div class="ide-picker-title">apps</div>
+    <div class="ide-picker-actions">
+      <button class="action-btn" data-action="openTab" data-arg="bridge.html"><span class="tpl-label">bridge</span><span class="tpl-desc">alpha version of the experimental bridge between octra &lt;&gt; eth</span></button>
+    </div>
+  </div>
+
+  <div class="view" id="view-dev">
+    <div class="balance-strip">
+      <span class="bal-label">balance:</span> <span id="ct-bal" class="mono">-</span>
+    </div>
+
+    <div id="ide-project-picker" style="display:none"></div>
+
+    <div id="ide-project-bar" class="ide-project-bar" style="display:none"></div>
+
+    <div class="ide-layout">
+      <div id="ide-file-tree" class="ide-file-tree" style="display:none"></div>
+
+      <div class="ide-editor-area">
+        <div id="ide-tabs" class="ide-tabs" style="display:none"></div>
+
+        <div class="section-title">compile contract</div>
+        <div class="form-area">
+          <div class="form-row">
+            <label>language</label>
+            <select id="ct-lang" data-change="onLangChange">
+              <option value="aml" selected>AppliedML (.aml)</option>
+              <option value="asm">Assembly (.oasm)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label id="ct-source-label">AppliedML source (.aml)</label>
+            <div class="editor-wrap">
+              <div class="editor-gutter" id="ct-gutter">1</div>
+              <div class="editor-body">
+                <pre class="editor-highlight" id="ct-highlight"></pre>
+                <textarea id="ct-source" class="code-editor" rows="14" data-input="editorUpdateWithLiveCompile" placeholder="contract Token {
+  state { name: string, balances: map[address]u128 }
+  constructor(n: string, supply: u128) {
+    require(supply > 0, &quot;supply must be positive&quot;)
+    self.name = n
+    self.balances[origin] = supply
+  }
+  fn transfer(to: address, amt: u128): bool {
+    require(amt > 0, &quot;amount must be positive&quot;)
+    let bal = self.balances[caller]
+    require(bal >= amt, &quot;insufficient balance&quot;)
+    self.balances[caller] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    return true
+  }
+}" spellcheck="false"></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="action-btn" data-action="doCompile">compile</button>
+            <select id="ct-template" data-change="loadTemplate" style="margin-left:8px">
+              <option value="">- templates -</option>
+              <option value="token">OCS01 Token</option>
+              <option value="vault">Simple Vault</option>
+              <option value="amm">Swap AMM</option>
+              <option value="escrow">Escrow</option>
+              <option value="multisig">Multisig</option>
+            </select>
+          </div>
+          <div id="ct-compile-result"></div>
+
+          <div class="ide-bottom-tabs">
+            <button class="ide-bottom-tab active" data-panel="abi" data-action="switchBottomTab" data-arg="abi">ABI</button>
+            <button class="ide-bottom-tab" data-panel="verify" data-action="switchBottomTab" data-arg="verify">Verify</button>
+            <button class="ide-bottom-tab" data-panel="disasm" data-action="switchBottomTab" data-arg="disasm">Assembly</button>
+            <button class="ide-bottom-tab" data-panel="console" data-action="switchBottomTab" data-arg="console">Console</button>
+            <button class="ide-bottom-tab" data-panel="storage" data-action="switchBottomTab" data-arg="storage">Storage</button>
+          </div>
+          <div id="ct-abi-display" class="ide-bottom-panel active" style="display:none">
+            <pre id="ct-abi-json" class="code-editor" style="font-size:11px;max-height:250px;overflow:auto;padding:8px"></pre>
+          </div>
+          <div id="ct-verify-display" class="ide-bottom-panel" style="display:none">
+            <div id="ct-verify-output" class="console-output" style="font-family:monospace;font-size:12px"><div class="panel-empty">compile AppliedML to view formal verification trace</div></div>
+          </div>
+          <div id="ct-disasm-display" class="ide-bottom-panel" style="display:none">
+            <pre id="ct-disasm-code" class="code-editor disasm-view" style="font-size:11px;max-height:250px;overflow:auto;padding:8px;color:#2C3E50"><span class="panel-empty">compile a contract to view assembly</span></pre>
+          </div>
+          <div id="ct-console-display" class="ide-bottom-panel" style="display:none">
+            <div id="ct-console-output" class="console-output"></div>
+          </div>
+          <div id="ct-storage-display" class="ide-bottom-panel" style="display:none">
+            <div id="ct-storage-output" class="console-output" style="font-family:monospace;font-size:12px"><div class="panel-empty">deploy a contract to view storage</div></div>
+          </div>
+        </div>
+
+    <div class="section-title">deploy contract</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>bytecode (base64, from compile)</label>
+        <textarea id="ct-bytecode" rows="3" class="code-editor" placeholder="compiled bytecode..." spellcheck="false"></textarea>
+      </div>
+      <div class="form-row">
+        <label>constructor params (json array, optional)</label>
+        <input type="text" id="ct-deploy-params" placeholder='["MyToken", "MTK", 1000000]'>
+      </div>
+      <div class="form-row">
+        <label>fee (ou) - recommended by default</label>
+        <input type="text" id="ct-deploy-fee" placeholder="...">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doPreviewDeploy">preview address</button>
+        <button class="action-btn" id="btn-deploy" data-action="doDeploy">deploy</button>
+      </div>
+      <div id="ct-deploy-result"></div>
+    </div>
+
+    <div class="section-title">call contract</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>contract address</label>
+        <input type="text" id="ct-call-addr" placeholder="oct...">
+      </div>
+      <div class="form-row">
+        <label>method name</label>
+        <input type="text" id="ct-call-method" placeholder="transfer">
+      </div>
+      <div class="form-row">
+        <label>params (json array)</label>
+        <input type="text" id="ct-call-params" placeholder='["oct...", 100] use enc(N) for FHE'>
+      </div>
+      <div class="form-row">
+        <label>amount (oct, optional)</label>
+        <input type="text" id="ct-call-amount" placeholder="0">
+      </div>
+      <div class="form-row">
+        <label>fee (ou) - recommended by default</label>
+        <input type="text" id="ct-call-fee" placeholder="...">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doContractCall">send call tx</button>
+        <button class="action-btn" data-action="doContractView">view (read-only)</button>
+      </div>
+      <div id="ct-call-result"></div>
+    </div>
+
+    <div class="section-title">FHE tools</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>encrypt integer to ciphertext</label>
+        <input type="text" id="fhe-enc-value" placeholder="integer value (e.g. 100)">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doFheEncrypt">encrypt</button>
+      </div>
+      <div class="form-row" id="fhe-enc-result-row" style="display:none">
+        <label>ciphertext (base64) - click to select</label>
+        <textarea id="fhe-enc-output" class="code-editor" rows="3" readonly data-action="selectSelf" style="white-space:pre-wrap;word-break:break-all"></textarea>
+      </div>
+      <div class="form-row">
+        <label>decrypt ciphertext to integer</label>
+        <textarea id="fhe-dec-input" class="code-editor" rows="3" placeholder="paste base64 ciphertext..." style="white-space:pre-wrap;word-break:break-all"></textarea>
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doFheDecrypt">decrypt</button>
+      </div>
+      <div id="fhe-result"></div>
+    </div>
+
+    <div class="section-title">contract info</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>contract address</label>
+        <input type="text" id="ct-info-addr" placeholder="oct...">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doContractInfo">lookup</button>
+        <button class="action-btn" data-action="doContractReceipt">last receipt</button>
+      </div>
+      <div id="ct-info-result"></div>
+    </div>
+
+    <div class="section-title">verify contract source</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>contract address</label>
+        <input type="text" id="ct-verify-addr" placeholder="oct...">
+      </div>
+      <div class="form-row" id="ct-verify-single">
+        <label>AppliedML source (.aml)</label>
+        <textarea id="ct-verify-source" class="code-editor" rows="8" placeholder="paste contract source code..." spellcheck="false"></textarea>
+      </div>
+      <div class="form-row" id="ct-verify-project" style="display:none">
+        <label>source files (from current project)</label>
+        <div id="ct-verify-project-files" style="font-size:12px;color:#7f8c8d;padding:4px 0"></div>
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doVerifyContract">verify source</button>
+      </div>
+      <div id="ct-verify-result"></div>
+    </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-history">
+    <div class="section-title">transaction history (<span id="hist-count">0</span> / <span id="hist-total">0</span>)</div>
+    <div id="history-list"><div class="loading">loading...</div></div>
+    <div id="history-more"></div>
+  </div>
+
+  <div class="view" id="view-keys">
+    <div class="section-title">wallet keys</div>
+    <div class="keys-warn">private key is sensitive - do not share</div>
+    <div id="keys-table"><div class="loading">loading...</div></div>
+  </div>
+
+  <div class="view" id="view-settings">
+    <div class="section-title">network settings</div>
+    <div class="form-area">
+      <div class="form-row">
+        <label>rpc url</label>
+        <input type="text" id="settings-rpc" placeholder="http://165.227.225.79:8080">
+      </div>
+      <div class="form-row">
+        <label>explorer url</label>
+        <input type="text" id="settings-explorer" placeholder="https://devnet.octrascan.io">
+      </div>
+      <div class="form-row">
+        <label>relayer url</label>
+        <input type="text" id="settings-bridge-signer" placeholder="https://relayer-002838819188.octra.network">
+      </div>
+      <div class="action-row">
+        <button class="action-btn" data-action="doSaveSettings">save</button>
+      </div>
+      <div id="settings-result"></div>
+    </div>
+    <div class="section-title">wallets</div>
+    <div class="form-area">
+      <div id="wallet-list"><div class="loading">loading...</div></div>
+      <div id="wallet-actions"></div>
+      <div id="wallet-mgmt-result"></div>
+    </div>
+    <div class="section-title">change PIN</div>
+    <div class="form-area">
+      <form data-nosubmit>
+      <input type="text" autocomplete="username" value="octra-wallet" readonly aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+      <div class="form-row">
+        <label>current PIN</label>
+        <input type="password" id="pin-current" maxlength="64" placeholder="••••••••••••" autocomplete="current-password">
+      </div>
+      <div class="form-row">
+        <label>new PIN</label>
+        <input type="password" id="pin-new" maxlength="64" placeholder="••••••••••••" autocomplete="new-password" passwordrules="minlength: 15;">
+      </div>
+      <div class="form-row">
+        <label>confirm new PIN</label>
+        <input type="password" id="pin-confirm-new" maxlength="64" placeholder="••••••••••••" autocomplete="new-password" passwordrules="minlength: 15;">
+      </div>
+      <div class="form-row" style="font-size:11px;color:#8C9DB6;line-height:1.4">
+        new PIN must be at least 8 characters. 15 or more recommended; your password manager can generate a strong one.
+      </div>
+      <div class="action-row">
+        <button type="button" class="action-btn" data-action="doChangePin">change PIN</button>
+      </div>
+      </form>
+      <div id="pin-change-result"></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-tx">
+    <a href="#" class="back-link" data-action="goBack" data-prevent="1">&larr; back</a>
+    <div class="section-title">transaction</div>
+    <div id="tx-detail"><div class="loading">loading...</div></div>
+  </div>
+
+</div>
+
+<div class="footer">octra_wallet | 2026 | alpha ver. - 0.05.01</div>
+
+</div>
+<script src="wallet.js?v=16"></script>
+</body>
+</html>

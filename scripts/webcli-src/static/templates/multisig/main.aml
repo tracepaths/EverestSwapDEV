@@ -1,0 +1,89 @@
+contract Multisig {
+  const MAX_OWNERS: int = 5
+  state {
+    owners: map[address]bool
+    owner_count: int
+    threshold: int
+    next_id: int
+    proposals: map[int]string
+    prop_amounts: map[int]u128
+    prop_targets: map[int]address
+    votes: map[int]map[address]bool
+    vote_counts: map[int]int
+    executed: map[int]bool
+  }
+
+  event Proposed(id: int, target: address, amount: u128)
+  event Voted(id: int, voter: address)
+  event Executed(id: int)
+  event OwnerAdded(owner: address)
+  event ThresholdChanged(threshold: int)
+
+  constructor(threshold_val: int) {
+    require(threshold_val > 0, "threshold must be > 0")
+    require(threshold_val <= 1, "threshold exceeds owners")
+    self.threshold = threshold_val
+    self.next_id = 0
+    self.owner_count = 1
+    self.owners[origin] = true
+  }
+
+  private fn require_owner() {
+    require(self.owners[caller], "not owner")
+  }
+
+  fn add_owner(owner: address): bool {
+    require_owner()
+    assert_address(owner)
+    require(!self.owners[owner], "already owner")
+    require(self.owner_count < MAX_OWNERS, "too many owners")
+    self.owners[owner] = true
+    self.owner_count += 1
+    emit OwnerAdded(owner)
+    return true
+  }
+
+  fn set_threshold(threshold_val: int): bool {
+    require_owner()
+    require(threshold_val > 0, "threshold must be > 0")
+    require(threshold_val <= self.owner_count, "threshold exceeds owners")
+    self.threshold = threshold_val
+    emit ThresholdChanged(threshold_val)
+    return true
+  }
+
+  fn propose(target: address, amount: u128, desc: string): int {
+    require_owner()
+    assert_address(target)
+    require(amount > 0, "amount must be positive")
+    let id = self.next_id
+    self.proposals[id] = desc
+    self.prop_amounts[id] = amount
+    self.prop_targets[id] = target
+    self.vote_counts[id] = 0
+    self.executed[id] = false
+    self.next_id = id + 1
+    emit Proposed(id, target, amount)
+    return id
+  }
+
+  fn vote(id: int): bool {
+    require_owner()
+    require(!self.executed[id], "already executed")
+    require(!self.votes[id][caller], "already voted")
+    self.votes[id][caller] = true
+    self.vote_counts[id] += 1
+    emit Voted(id, caller)
+    if self.vote_counts[id] >= self.threshold {
+      self.executed[id] = true
+      let ok = transfer(self.prop_targets[id], self.prop_amounts[id])
+      require(ok, "transfer failed")
+      emit Executed(id)
+    }
+    return true
+  }
+
+  view fn get_proposal(id: int): string {
+    return self.proposals[id]
+  }
+}

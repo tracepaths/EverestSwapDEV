@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCT swap | devnet demo</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Tahoma,arial,sans-serif;background:#F0F2F5;color:#2B3A52;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:40px 16px;font-size:12px;letter-spacing:0.5px}
+.swap-wrap{width:100%;max-width:440px;background:#fff;border:1px solid #D0D7E2;overflow:hidden}
+.swap-header{padding:14px 20px;border-bottom:1px solid #E5E9EF;display:flex;align-items:center;justify-content:space-between}
+.swap-header h1{font-size:14px;font-weight:600;color:#2B3A52}
+.swap-header .wallet-badge{font-size:11px;color:#8C9DB6;font-family:monospace}
+.swap-header .wallet-badge.connected{color:#4CAF50}
+.swap-header .wallet-badge.disconnected{color:#E57373}
+.notice-bar{padding:10px 20px;background:#F7F8FA;border-bottom:1px solid #E5E9EF;font-size:11px;color:#8C9DB6;line-height:170%}
+.notice-bar a{color:#3B567F;border-bottom:1px solid #D0D7E2;text-decoration:none;font-family:monospace;font-size:10px}
+.notice-bar a:hover{border-bottom-color:#3B567F}
+.notice-bar .disclaimer{margin-top:6px;color:#B0B8C8;font-size:10px}
+.price-bar{padding:10px 20px;background:#F7F8FA;border-bottom:1px solid #E5E9EF;display:flex;justify-content:space-between;font-size:12px;color:#516E9A}
+.price-bar .price-val{font-weight:600;font-family:monospace}
+.dir-tabs{display:flex;border-bottom:1px solid #E5E9EF}
+.dir-tabs button{flex:1;padding:10px;font-size:12px;font-weight:500;border:none;background:#fff;cursor:pointer;color:#8C9DB6;border-bottom:2px solid transparent;transition:all 0.15s;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.dir-tabs button.active{color:#3B567F;border-bottom-color:#3B567F}
+.dir-tabs button:hover{background:#F7F8FA}
+.swap-body{padding:16px 20px}
+.input-group{margin-bottom:14px}
+.input-group label{display:block;font-size:11px;color:#8C9DB6;letter-spacing:0.5px;margin-bottom:4px}
+.input-row{display:flex;align-items:center;border:1px solid #C0C6D0;overflow:hidden;transition:border-color 0.15s}
+.input-row:focus-within{border-color:#3B567F}
+.input-row input{flex:1;padding:10px;font-size:14px;font-family:monospace;border:none;outline:none;background:transparent}
+.input-row .token-label{padding:10px 14px;font-size:12px;font-weight:600;color:#3B567F;background:#F7F8FA;border-left:1px solid #E5E9EF;white-space:nowrap}
+.max-btn{padding:3px 7px;font-size:10px;color:#3B567F;background:#E5E9EF;border:none;cursor:pointer;margin-right:6px;font-weight:600}
+.max-btn:hover{background:#D0D7E2}
+.output-box{padding:10px;background:#F7F8FA;border:1px solid #E5E9EF;font-family:monospace;font-size:14px;color:#2B3A52;min-height:40px;display:flex;align-items:center;justify-content:space-between}
+.output-box .out-val{font-weight:600}
+.output-box .out-token{color:#8C9DB6;font-size:12px}
+.info-rows{margin:14px 0;font-size:12px;color:#516E9A}
+.info-rows .info-row{display:flex;justify-content:space-between;padding:3px 0}
+.info-rows .info-row .val{font-family:monospace;color:#2B3A52}
+.swap-btn{width:100%;padding:12px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:#3B567F;color:#fff;transition:background 0.15s;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.swap-btn:hover{background:#2B4060}
+.swap-btn:disabled{background:#C0C6D0;cursor:not-allowed}
+.swap-btn.loading{opacity:0.7;pointer-events:none}
+.balance-bar{padding:10px 20px;border-top:1px solid #E5E9EF;font-size:12px;color:#8C9DB6;display:flex;justify-content:space-between}
+.balance-bar .bal-val{font-family:monospace;color:#2B3A52;font-weight:500}
+.status-msg{padding:10px 20px;font-size:12px;text-align:center;display:none}
+.status-msg.ok{color:#4CAF50;display:block}
+.status-msg.err{color:#E57373;display:block}
+.status-msg.info{color:#516E9A;display:block}
+.modal-bg{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:none;justify-content:center;align-items:center;z-index:100}
+.modal-bg.show{display:flex}
+.modal-box{background:#fff;padding:20px;width:90%;max-width:380px;box-shadow:0 4px 20px rgba(0,0,0,0.15);border:1px solid #D0D7E2}
+.modal-box h2{font-size:14px;margin-bottom:14px;color:#2B3A52;font-weight:600}
+.modal-box .confirm-detail{margin-bottom:14px;font-size:12px;color:#516E9A;line-height:1.7}
+.modal-box .confirm-detail .cd-row{display:flex;justify-content:space-between;padding:3px 0}
+.modal-box .confirm-detail .cd-val{font-family:monospace;font-weight:600;color:#2B3A52}
+.modal-btns{display:flex;gap:8px}
+.modal-btns button{flex:1;padding:10px;font-size:12px;font-weight:500;border:none;cursor:pointer;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.modal-btns .btn-cancel{background:#E5E9EF;color:#516E9A}
+.modal-btns .btn-cancel:hover{background:#D0D7E2}
+.modal-btns .btn-confirm{background:#3B567F;color:#fff}
+.modal-btns .btn-confirm:hover{background:#2B4060}
+.progress-steps{margin:10px 0;font-size:12px;color:#8C9DB6}
+.progress-steps .step{padding:3px 0}
+.progress-steps .step.active{color:#3B567F;font-weight:500}
+.progress-steps .step.done{color:#4CAF50}
+.progress-steps .step.fail{color:#E57373}
+.unlock-screen{padding:40px 20px;text-align:center}
+.unlock-screen p{color:#8C9DB6;margin-bottom:14px;font-size:12px}
+.unlock-screen input{width:200px;padding:10px;font-size:16px;text-align:center;border:1px solid #C0C6D0;letter-spacing:8px;font-family:monospace;outline:none}
+.unlock-screen input:focus{border-color:#3B567F}
+.unlock-screen button{display:block;margin:14px auto 0;padding:10px 28px;font-size:12px;background:#3B567F;color:#fff;border:none;cursor:pointer;font-family:Tahoma,arial,sans-serif;letter-spacing:0.5px}
+.unlock-screen button:hover{background:#2B4060}
+.pool-info{padding:8px 20px;font-size:11px;color:#8C9DB6;border-top:1px solid #E5E9EF;text-align:center;font-family:monospace}
+@media(max-width:500px){body{padding:0;align-items:stretch}.swap-wrap{border:none;min-height:100vh}}
+</style>
+</head>
+<body>
+<div class="swap-wrap" id="app">
+  <div id="unlock-view" class="unlock-screen" style="display:none">
+    <h1 style="margin-bottom:8px;font-size:16px">OCT swap</h1>
+    <p>unlock your wallet to continue</p>
+    <input type="password" id="pin-input" maxlength="6" placeholder="------" inputmode="numeric" autocomplete="off">
+    <button data-action="doUnlock">unlock</button>
+    <div id="unlock-err" class="status-msg"></div>
+  </div>
+  <div id="swap-view" style="display:none">
+    <div class="swap-header">
+      <h1>OCT / tUSD</h1>
+      <span class="wallet-badge connected" id="wallet-addr"></span>
+    </div>
+    <div class="notice-bar">
+      <div>
+        token: <a href="https://devnet.octrascan.io/address.html?addr=oct6J37Wx7Rb1putvfwFrFbGUStE8hGzsb33fhLgUdpTx6d" target="_blank">oct6J37Wx7Rb1putvfwFrFbGUStE8hGzsb33fhLgUdpTx6d</a>
+      </div>
+      <div>
+        pool: <a href="https://devnet.octrascan.io/address.html?addr=octBjnQBicZs6iMwcRxrdzLYAzyVTi91KEiA8RGkVjco2w6" target="_blank">octBjnQBicZs6iMwcRxrdzLYAzyVTi91KEiA8RGkVjco2w6</a>
+      </div>
+      <div class="disclaimer">demo swap protocol, devnet tokens, for testing purposes only</div>
+    </div>
+    <div class="price-bar">
+      <span>1 OCT =</span>
+      <span class="price-val" id="price-display">...</span>
+    </div>
+    <div class="dir-tabs">
+      <button id="tab-buy" class="active" data-action="setDir" data-arg="buy">buy tUSD</button>
+      <button id="tab-sell" data-action="setDir" data-arg="sell">sell tUSD</button>
+    </div>
+    <div class="swap-body">
+      <div class="input-group">
+        <label id="input-label">you pay</label>
+        <div class="input-row">
+          <input type="text" id="swap-input" placeholder="0.0" inputmode="decimal" autocomplete="off" data-input="onInputChange">
+          <button class="max-btn" data-action="setMax">max</button>
+          <div class="token-label" id="input-token">OCT</div>
+        </div>
+      </div>
+      <div class="input-group">
+        <label>you receive (estimated)</label>
+        <div class="output-box">
+          <span class="out-val" id="output-val">0</span>
+          <span class="out-token" id="output-token">tUSD</span>
+        </div>
+      </div>
+      <div class="info-rows">
+        <div class="info-row"><span>price impact</span><span class="val" id="impact-val">-</span></div>
+        <div class="info-row"><span>fee</span><span class="val" id="fee-val">0.1 OCT</span></div>
+      </div>
+      <button class="swap-btn" id="swap-btn" data-action="doSwap" disabled>enter amount</button>
+    </div>
+    <div id="status-area" class="status-msg"></div>
+    <div id="progress-area" class="progress-steps" style="display:none;padding:0 20px 10px"></div>
+    <div class="balance-bar">
+      <div>OCT: <span class="bal-val" id="bal-oct">...</span></div>
+      <div>tUSD: <span class="bal-val" id="bal-tusd">...</span></div>
+    </div>
+    <div class="pool-info" id="pool-info">loading reserves...</div>
+  </div>
+</div>
+<div class="modal-bg" id="confirm-modal">
+  <div class="modal-box">
+    <h2>confirm swap</h2>
+    <div class="confirm-detail" id="confirm-detail"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" data-action="cancelSwap">cancel</button>
+      <button class="btn-confirm" id="btn-do-confirm" data-action="confirmSwap">confirm</button>
+    </div>
+  </div>
+</div>
+<script src="swap.js?v=3"></script>
+</body>
+</html>

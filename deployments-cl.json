@@ -1,0 +1,46 @@
+{
+  "done": {
+    "labelA": true,
+    "labelB": true,
+    "template": true,
+    "managerFactory": true,
+    "routerFactory": true
+  },
+  "tokenA": "octBRv9PdSNngYAJXWga13PMzbvizqYY8f7cJTSaeKQ6wdf",
+  "tokenB": "oct7nDyA7D3PztXJ75AcczqiLaVVDdFLXbMrwzA26fRNaJs",
+  "woct": "oct4g33tzC2cJncL5RFr9TRiyk8yCNP1h2xaogiWJS5opNv",
+  "deployer": "octGXi34vZfYwi3idjSa6m34vLJCoJHNMNAGeHyqh7JVEvy",
+  "templateBytes": 40680,
+  "superseded": {
+    "positionManager": [
+      "oct9pP4anBgTxdCFaTxv28VVXUSTjqw87vw15aUmNDiN1ko",
+      "oct31bUiH4JCk4sce6iysuuEJDrjxHYVxEe4fj19VsABoXG"
+    ],
+    "factory": [
+      "oct5KjMuf3f1C3sXXcYXWrAixf3ADBwNTgzussd5iackoX5"
+    ],
+    "router": [
+      "oct6Z8oWy8SeAi6mxoarFQm8pkqc6iG9qbwpQDATwUesxib"
+    ],
+    "pools": [
+      {
+        "500": "octAdAnwKCZNPJfioBv8YyiquV8NyQw33C51SFyeszG9aAV",
+        "3000": "oct9Yy36pYWPuqWj4HX6eXyTDJhdoQJNkHKmm278DkcoBLh",
+        "10000": "octFazQM5RkL41w1VTyFsWHCc52mdoTk7wqpeWftWsmtHyX"
+      }
+    ]
+  },
+  "factory": "oct6L2GFM7G43goYGaQzHEpkNeKfCVSeDDNVEakxQNvxUCD",
+  "positionManager": "oct9TfjwZb5LSrqwVLWsArYiVsbugx3mN8C1Azk67xkbfpa",
+  "router": "oct6AG8zJxDjJ7wALaXJhnu988UKHihz4PrDjPSiX8VC6br",
+  "pools": {
+    "3000": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3"
+  },
+  "tokenC": "oct7DADpDbff3FxxZ9XvqEvwRz7iVAkv4PUqSs8Ytxrh9Y8",
+  "routePools": {
+    "AB": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3",
+    "BC": "oct7hDMyKSXjkukJc5fm8MX9YKkE52QHzD2mj4NmhJf6WpP"
+  },
+  "tokenLauncher": "oct4BLS6XtRbx5dGiZfjWaXyuqgydcf8bNxCeBZyyoKKHPx",
+  "tokenTemplateBytes": 22648
+}

@@ -1,0 +1,192 @@
+// EverestSwap token launcher.
+//
+// Exists for one reason: a wallet on this chain cannot deploy a contract, only
+// call one. So a person who wants to issue a token has to ask a contract to
+// spawn it for them, and this is that contract. It holds one piece of token
+// bytecode and stamps out copies of it on request.
+//
+// Every token it produces is the same audited code with different settings, so
+// the bytecode is worth reading once rather than once per launch. The launcher
+// keeps no power over what it spawns: ownership of a new token goes to whoever
+// asked for it, in the same transaction, and the launcher retains nothing but a
+// record that the token came from here.
+//
+// The three configuration calls run inside this one transaction. If any of them
+// fails the spawn is undone with it, so a token that exists is always a token
+// that is fully configured.
+
+contract EverestTokenLauncher {
+  state {
+    owner: address
+    pending_owner: address
+    token_template: string
+    spawn_count: int
+
+    tokens: list[address]
+    token_count: int        // explicit: len() on a state list always reads 1
+    creator_of: map[address]address
+    is_token: map[address]bool
+
+    // Per creator, so a wallet can find the tokens it launched without reading
+    // the whole registry.
+    // A list cannot be nested inside a map here, so this is an index into a
+    // two-level map: launched[who][i] with launched_count[who] as the length.
+    launched: map[address]map[int]address
+    launched_count: map[address]int
+
+    paused: bool
+  }
+
+  event TokenLaunched(token: address, creator: address, name: string, symbol: string, supply: int, decimals: int)
+  event TemplateSet(size: int)
+  event OwnerTransferProposed(current: address, pending: address)
+  event OwnerTransferred(previous: address, current: address)
+  event PausedSet(paused: bool)
+
+  constructor() {
+    self.owner = caller
+    self.pending_owner = ""
+    self.token_count = 0
+    self.spawn_count = 0
+    self.paused = false
+  }
+
+  // ── Administration ───────────────────────────────────────────────────
+
+  // An address that was never written reads back as "0" rather than empty, and an
+  // explicitly cleared one reads back as empty, so emptiness has to cover both.
+  view fn unset(a: address): bool {
+    return a == "0" || a == ""
+  }
+
+  fn set_token_template(bytecode: string): bool {
+    require(caller == self.owner, "not owner")
+    require(len(bytecode) > 0, "empty template")
+    self.token_template = bytecode
+    emit TemplateSet(len(bytecode))
+    return true
+  }
+
+  // Two-step handover so a mistyped address cannot orphan the launcher.
+  fn propose_owner(next: address): bool {
+    require(caller == self.owner, "not owner")
+    assert_address(next)
+    self.pending_owner = next
+    emit OwnerTransferProposed(self.owner, next)
+    return true
+  }
+
+  fn accept_owner(): bool {
+    require(!unset(self.pending_owner), "no pending owner")
+    require(caller == self.pending_owner, "not pending owner")
+    let prev = self.owner
+    self.owner = caller
+    self.pending_owner = ""
+    emit OwnerTransferred(prev, self.owner)
+    return true
+  }
+
+  // 1 stops new launches, 0 allows them again. An int rather than a bool because
+  // a flag arriving as text reads as true whatever it said. Tokens already
+  // launched are untouched either way; this contract has no hold over them.
+  fn set_paused(p: int): bool {
+    require(caller == self.owner, "not owner")
+    let on = p != 0
+    self.paused = on
+    emit PausedSet(on)
+    return true
+  }
+
+  // ── Launching ────────────────────────────────────────────────────────
+
+  // Flags travel as 1 or 0 rather than as booleans: a boolean handed from one
+  // contract to another reads as set whatever it said, which would quietly turn
+  // on every feature the caller had left off.
+  nonreentrant fn launch(
+    name: string,
+    symbol: string,
+    contract_name: string,
+    supply: int,
+    dec: int,
+    supply_recipient: address,
+    mint_f: int,
+    burn_f: int,
+    pause_f: int,
+    black_f: int,
+    maxtx_f: int,
+    maxwallet_f: int,
+    cool_f: int,
+    tax_f: int,
+    autoburn_f: int,
+    max_tx: int,
+    max_wallet: int,
+    cooldown: int,
+    tax: int,
+    tax_to: address,
+    burn_bps: int
+  ): address {
+    require(!self.paused, "launcher paused")
+    require(len(self.token_template) > 0, "token template not set")
+    assert_address(supply_recipient)
+    require(supply_recipient != "", "supply recipient is zero")
+
+    let t = deploy(self.token_template)
+    self.spawn_count = self.spawn_count + 1
+
+    // Ownership goes to the caller. The launcher is only ever the spawner, which
+    // buys it nothing once these three calls have run.
+    require(call(t, "configure", [name, symbol, contract_name, supply, dec, caller, supply_recipient]), "configure failed")
+    require(call(t, "set_flags", [mint_f, burn_f, pause_f, black_f, maxtx_f, maxwallet_f, cool_f, tax_f, autoburn_f]), "flags failed")
+    require(call(t, "set_limits", [max_tx, max_wallet, cooldown, tax, tax_to, burn_bps]), "limits failed")
+
+    self.creator_of[t] = caller
+    self.is_token[t] = true
+    self.tokens.push(t)
+    self.token_count = self.token_count + 1
+    self.launched[caller][self.launched_count[caller]] = t
+    self.launched_count[caller] = self.launched_count[caller] + 1
+
+    emit TokenLaunched(t, caller, name, symbol, supply, dec)
+    return t
+  }
+
+  // ── Views ────────────────────────────────────────────────────────────
+
+  view fn get_owner(): address { return self.owner }
+  view fn get_pending_owner(): address { return self.pending_owner }
+  view fn is_paused(): bool { return self.paused }
+  view fn get_template_size(): int { return len(self.token_template) }
+  view fn get_spawn_count(): int { return self.spawn_count }
+  view fn get_token_count(): int { return self.token_count }
+  view fn get_token_at(i: int): address { return self.tokens[i] }
+  view fn get_creator(token: address): address { return self.creator_of[token] }
+  view fn get_is_token(token: address): bool { return self.is_token[token] }
+  view fn get_launched_count(who: address): int { return self.launched_count[who] }
+  view fn get_launched_at(who: address, i: int): address { return self.launched[who][i] }
+
+  // The newest token a wallet launched, which is the one a wizard has just made
+  // and needs the address of. Reading it back beats guessing at the address:
+  // a spawned contract's address depends on the launcher's nonce, not the
+  // caller's, so the caller cannot compute it in advance.
+  view fn get_last_launched(who: address): address {
+    let n = self.launched_count[who]
+    require(n > 0, "nothing launched")
+    return self.launched[who][n - 1]
+  }
+
+  // One string instead of a call per token, since the public node rate-limits
+  // bursts of reads.
+  view fn launched_packed(who: address, start: int, count: int): string {
+    let n = self.launched_count[who]
+    let out = ""
+    let i = start
+    let seen = 0
+    while i < n && seen < count {
+      if seen > 0 { out = out + "," }
+      out = out + self.launched[who][i]
+      i = i + 1
+      seen = seen + 1
+    }
+    return out
+  }
+}
