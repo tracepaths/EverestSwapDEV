@@ -14,33 +14,48 @@
   "superseded": {
     "positionManager": [
       "oct9pP4anBgTxdCFaTxv28VVXUSTjqw87vw15aUmNDiN1ko",
-      "oct31bUiH4JCk4sce6iysuuEJDrjxHYVxEe4fj19VsABoXG"
+      "oct31bUiH4JCk4sce6iysuuEJDrjxHYVxEe4fj19VsABoXG",
+      "oct9TfjwZb5LSrqwVLWsArYiVsbugx3mN8C1Azk67xkbfpa"
     ],
     "factory": [
-      "oct5KjMuf3f1C3sXXcYXWrAixf3ADBwNTgzussd5iackoX5"
+      "oct5KjMuf3f1C3sXXcYXWrAixf3ADBwNTgzussd5iackoX5",
+      "oct6L2GFM7G43goYGaQzHEpkNeKfCVSeDDNVEakxQNvxUCD"
     ],
     "router": [
-      "oct6Z8oWy8SeAi6mxoarFQm8pkqc6iG9qbwpQDATwUesxib"
+      "oct6Z8oWy8SeAi6mxoarFQm8pkqc6iG9qbwpQDATwUesxib",
+      "oct6AG8zJxDjJ7wALaXJhnu988UKHihz4PrDjPSiX8VC6br"
     ],
     "pools": [
       {
         "500": "octAdAnwKCZNPJfioBv8YyiquV8NyQw33C51SFyeszG9aAV",
         "3000": "oct9Yy36pYWPuqWj4HX6eXyTDJhdoQJNkHKmm278DkcoBLh",
         "10000": "octFazQM5RkL41w1VTyFsWHCc52mdoTk7wqpeWftWsmtHyX"
+      },
+      {
+        "3000": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3"
+      }
+    ],
+    "tokenLauncher": [
+      "oct4BLS6XtRbx5dGiZfjWaXyuqgydcf8bNxCeBZyyoKKHPx"
+    ],
+    "routePools": [
+      {
+        "AB": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3",
+        "BC": "oct7hDMyKSXjkukJc5fm8MX9YKkE52QHzD2mj4NmhJf6WpP"
       }
     ]
   },
-  "factory": "oct6L2GFM7G43goYGaQzHEpkNeKfCVSeDDNVEakxQNvxUCD",
-  "positionManager": "oct9TfjwZb5LSrqwVLWsArYiVsbugx3mN8C1Azk67xkbfpa",
-  "router": "oct6AG8zJxDjJ7wALaXJhnu988UKHihz4PrDjPSiX8VC6br",
-  "pools": {
-    "3000": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3"
-  },
   "tokenC": "oct7DADpDbff3FxxZ9XvqEvwRz7iVAkv4PUqSs8Ytxrh9Y8",
-  "routePools": {
-    "AB": "oct4X2dw5ndabqy7frUSFqR8CopxYkdd9cUWJaWk1DMo3T3",
-    "BC": "oct7hDMyKSXjkukJc5fm8MX9YKkE52QHzD2mj4NmhJf6WpP"
+  "tokenTemplateBytes": 22720,
+  "factory": "octFCZsVEsG2QQhikQ7g9aF12n4svePo6vMMpnucnczkZc4",
+  "positionManager": "oct3wxoj7QzTXZibBfTy8AQpz1nA2zSWV4BxHRn7WbRmLJF",
+  "router": "octAZZPGExrJUPPhKWb67bfgps6qCrE47MEZ3J72DRzg8LG",
+  "tokenLauncher": "octLHwBXUZCeRRxmyBhic17aFsa6yUC7expZ7Ub7LSKKf99",
+  "pools": {
+    "3000": "octEFwTVxwWvWxi6jtRppQsyAKjRfY539BorgLZ3myD8y4y"
   },
-  "tokenLauncher": "oct4BLS6XtRbx5dGiZfjWaXyuqgydcf8bNxCeBZyyoKKHPx",
-  "tokenTemplateBytes": 22648
+  "routePools": {
+    "AB": "octEFwTVxwWvWxi6jtRppQsyAKjRfY539BorgLZ3myD8y4y",
+    "BC": "octBZFiqcAkxSAG5Rk9ChZN32AcvBY6Cw4ardY9gF1CK2f5"
+  }
 }
