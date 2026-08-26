@@ -37,8 +37,9 @@ const state = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
 const FEE_TIERS = [[100, 1], [500, 10], [3000, 60], [10000, 200]];
 
 /** Fields in a pool's state_packed, in order. Checked by count, because a change
- *  in shape silently shifts every reader that indexes into it. */
-const STATE_FIELDS = 14;
+ *  in shape silently shifts every reader that indexes into it. Field [14] is the
+ *  total outstanding liquidity counter, appended after `started`. */
+const STATE_FIELDS = 15;
 
 let passed = 0;
 const failures = [];

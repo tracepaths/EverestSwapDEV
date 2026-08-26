@@ -39,6 +39,15 @@ contract EverestFactory {
     pool_fee: map[address]int
     is_pool: map[address]bool
 
+    // Who created each pool, and which pools have been delisted. Delisting hides
+    // a pool from the registry without touching it on-chain: no list splice is
+    // possible (len() reads 1 on a state list), so `pools` keeps every pool ever
+    // made and readers skip the delisted ones. `listed_count` is the visible
+    // total; `pool_count` stays the all-time total so paging still sweeps all.
+    pool_creator: map[address]address
+    delisted: map[address]bool
+    listed_count: int
+
     paused: bool
   }
 
@@ -48,11 +57,13 @@ contract EverestFactory {
   event OwnerTransferProposed(current: address, pending: address)
   event OwnerTransferred(previous: address, current: address)
   event PausedSet(paused: bool)
+  event PoolDelisted(pool: address, by: address)
 
   constructor() {
     self.owner = caller
     self.pending_owner = ""
     self.pool_count = 0
+    self.listed_count = 0
     self.spawn_count = 0
     self.paused = false
     // Four tiers covering the usual spread of pair behaviour. Spacing scales
@@ -161,11 +172,37 @@ contract EverestFactory {
     self.pool_token1[p] = token_b
     self.pool_fee[p] = fee
     self.is_pool[p] = true
+    self.pool_creator[p] = caller
     self.pools.push(p)
     self.pool_count = self.pool_count + 1
+    self.listed_count = self.listed_count + 1
 
     emit PoolCreated(token_a, token_b, fee, s, p)
     return p
+  }
+
+  // Removes a pool from the registry. The pool keeps working on-chain — anyone
+  // holding its address can still swap, and any fees left in it stay
+  // collectable; it simply stops appearing in listings and frees its pair+tier
+  // slot so an equivalent pool can be created afresh. Only the pool's creator
+  // or the factory owner may do this, and only once the pool holds no
+  // liquidity at all — measured by the pool's own outstanding-liquidity total,
+  // which counts positions out of range too, not the active-range figure.
+  fn delist_pool(pool: address): bool {
+    require(self.is_pool[pool], "not a pool")
+    require(!self.delisted[pool], "already delisted")
+    require(caller == self.pool_creator[pool] || caller == self.owner, "not creator or owner")
+    require(call(pool, "total_liquidity", []) == 0, "pool still holds liquidity")
+    let t0 = self.pool_token0[pool]
+    let t1 = self.pool_token1[pool]
+    let fee = self.pool_fee[pool]
+    self.delisted[pool] = true
+    self.listed_count = self.listed_count - 1
+    // Clear both orderings so the pair+tier reads unset and can be recreated.
+    self.pool_of[t0][t1][fee] = ""
+    self.pool_of[t1][t0][fee] = ""
+    emit PoolDelisted(pool, caller)
+    return true
   }
 
   // ── Protocol fee, proxied so pools have a single administrator ───────
@@ -203,6 +240,9 @@ contract EverestFactory {
   view fn get_pool_token1(p: address): address { return self.pool_token1[p] }
   view fn get_pool_fee(p: address): int { return self.pool_fee[p] }
   view fn get_is_pool(p: address): bool { return self.is_pool[p] }
+  view fn get_pool_creator(p: address): address { return self.pool_creator[p] }
+  view fn is_delisted(p: address): bool { return self.delisted[p] }
+  view fn get_listed_count(): int { return self.listed_count }
   view fn get_spawn_count(): int { return self.spawn_count }
   view fn get_template_size(): int { return self.pool_template_bytes }
 
@@ -221,9 +261,11 @@ contract EverestFactory {
     let out = ""
     while i < stop {
       let p = self.pools[i]
-      let row = concat(concat(to_string(p), "|"), concat(to_string(self.pool_token0[p]), "|"))
-      let tail = concat(concat(to_string(self.pool_token1[p]), "|"), concat(to_string(self.pool_fee[p]), ";"))
-      out = concat(out, concat(row, tail))
+      if !self.delisted[p] {
+        let row = concat(concat(to_string(p), "|"), concat(to_string(self.pool_token0[p]), "|"))
+        let tail = concat(concat(to_string(self.pool_token1[p]), "|"), concat(to_string(self.pool_fee[p]), ";"))
+        out = concat(out, concat(row, tail))
+      }
       i = i + 1
     }
     return out
