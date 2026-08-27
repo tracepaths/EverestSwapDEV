@@ -27,6 +27,7 @@ view fn is_tick_initialized(tick: int, spacing: int): bool {
 }
 
 fn flip_tick(tick: int, spacing: int): bool {
+  require(self.gate > 0, "internal only")
   require(floor_mod(tick, spacing) == 0, "tick not on spacing")
   let c = floor_div(tick, spacing)
   let w = tick_word(c)

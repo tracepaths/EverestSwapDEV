@@ -21,6 +21,20 @@ contract EverestRouter {
   state {
     factory: address
     owner: address
+    // Transient re-entrancy gate. hop/take/sweep are externally callable (this
+    // VM has no function visibility) and each moves funds through a call() into
+    // a token or pool. An entry point opens the gate for the span of one trade
+    // and names the account being served in `gate_for`; the helpers refuse a
+    // call with the gate shut, and take/sweep additionally refuse to pull from
+    // or pay out to anyone but `gate_for`. Because every helper here works
+    // through an external call(), the gate necessarily stays open across those
+    // calls — unlike the pool, where it is closed before any call(). What makes
+    // a re-entrant call harmless anyway is the combination of the `gate_for`
+    // pin, the nonreentrant entry points, and the fact that the router never
+    // custodies funds between transactions: a re-entrant helper can only ever
+    // move the caller's own in-flight funds, never a third party's.
+    gate: int
+    gate_for: address
   }
 
   event Routed(trader: address, recipient: address, hops: int, amount_in: int, amount_out: int)
@@ -28,6 +42,7 @@ contract EverestRouter {
 
   constructor() {
     self.owner = caller
+    self.gate = 0
   }
 
   // An address that was never written reads back as "0" rather than empty, and an
@@ -72,6 +87,7 @@ contract EverestRouter {
   // exact-output hop the caller has already quoted the cost, so it is passed in
   // rather than quoted a second time.
   fn hop(p: address, dir: int, amount: int, draw: int, limit: int, to: address, deadline: int): bool {
+    require(self.gate > 0, "internal only")
     require(draw > 0, "nothing to pay with")
     let tin = token_in_of(p, dir)
     let far = call(p, "default_price_limit", [dir])
@@ -84,6 +100,7 @@ contract EverestRouter {
   // exact-output trade can leave a few units behind; they belong to the trader,
   // not to the router.
   fn sweep(token: address, to: address): bool {
+    require(self.gate > 0 && to == self.gate_for, "internal only")
     let bal = call(token, "balance_of", [self_addr])
     if bal > 0 {
       require(call(token, "transfer", [to, bal]), "sweep failed")
@@ -93,6 +110,7 @@ contract EverestRouter {
   }
 
   fn take(token: address, from: address, amount: int): bool {
+    require(self.gate > 0 && from == self.gate_for, "internal only")
     require(call(token, "pull", [from, self_addr, amount]), "input payment failed")
     return true
   }
@@ -106,9 +124,12 @@ contract EverestRouter {
     assert_address(recipient)
     let tin = token_in_of(p, dir)
     let tout = token_out_of(p, dir)
+    self.gate = 1
+    self.gate_for = caller
     require(take(tin, caller, amount_in), "funding failed")
     let before = call(tout, "balance_of", [recipient])
     require(hop(p, dir, amount_in, amount_in, amount_out_min, recipient, deadline), "hop failed")
+    self.gate = 0
     emit Routed(caller, recipient, 1, amount_in, call(tout, "balance_of", [recipient]) - before)
     return true
   }
@@ -123,6 +144,8 @@ contract EverestRouter {
     let tin = token_in_of(p1, z1)
     let mid = token_out_of(p1, z1)
     require(mid == token_in_of(p2, z2), "route tokens do not join")
+    self.gate = 1
+    self.gate_for = caller
     require(take(tin, caller, amount_in), "funding failed")
 
     let tout = token_out_of(p2, z2)
@@ -132,6 +155,7 @@ contract EverestRouter {
     require(got > 0, "first hop produced nothing")
     let out_before = call(tout, "balance_of", [recipient])
     require(hop(p2, z2, got, got, amount_out_min, recipient, deadline), "second hop failed")
+    self.gate = 0
 
     emit Routed(caller, recipient, 2, amount_in, call(tout, "balance_of", [recipient]) - out_before)
     return true
@@ -148,6 +172,8 @@ contract EverestRouter {
     let m2 = token_out_of(p2, z2)
     require(m1 == token_in_of(p2, z2), "route tokens do not join")
     require(m2 == token_in_of(p3, z3), "route tokens do not join")
+    self.gate = 1
+    self.gate_for = caller
     require(take(token_in_of(p1, z1), caller, amount_in), "funding failed")
 
     let b1 = call(m1, "balance_of", [self_addr])
@@ -163,6 +189,7 @@ contract EverestRouter {
     let tout = token_out_of(p3, z3)
     let out_before = call(tout, "balance_of", [recipient])
     require(hop(p3, z3, g2, g2, amount_out_min, recipient, deadline), "third hop failed")
+    self.gate = 0
     emit Routed(caller, recipient, 3, amount_in, call(tout, "balance_of", [recipient]) - out_before)
     return true
   }
@@ -183,9 +210,12 @@ contract EverestRouter {
     let need = call(p, "quote", [dir, 0 - amount_out, 0])
     require(need > 0, "output not reachable")
     require(need <= amount_in_max, "input above maximum")
+    self.gate = 1
+    self.gate_for = caller
     require(take(tin, caller, need), "funding failed")
     require(hop(p, dir, 0 - amount_out, need, need, recipient, deadline), "hop failed")
     require(sweep(tin, caller), "sweep failed")
+    self.gate = 0
     emit Routed(caller, recipient, 1, need, amount_out)
     return true
   }
@@ -207,11 +237,14 @@ contract EverestRouter {
     require(need_in > 0, "output not reachable")
     require(need_in <= amount_in_max, "input above maximum")
 
+    self.gate = 1
+    self.gate_for = caller
     require(take(tin, caller, need_in), "funding failed")
     require(hop(p1, z1, 0 - need_mid, need_in, need_in, self_addr, deadline), "first hop failed")
     require(hop(p2, z2, 0 - amount_out, need_mid, need_mid, recipient, deadline), "second hop failed")
     require(sweep(tin, caller), "sweep failed")
     require(sweep(mid, caller), "sweep failed")
+    self.gate = 0
     emit Routed(caller, recipient, 2, need_in, amount_out)
     return true
   }
@@ -236,6 +269,8 @@ contract EverestRouter {
     require(need_in > 0, "output not reachable")
     require(need_in <= amount_in_max, "input above maximum")
 
+    self.gate = 1
+    self.gate_for = caller
     require(take(token_in_of(p1, z1), caller, need_in), "funding failed")
     require(hop(p1, z1, 0 - need_m1, need_in, need_in, self_addr, deadline), "first hop failed")
     require(hop(p2, z2, 0 - need_m2, need_m1, need_m1, self_addr, deadline), "second hop failed")
@@ -243,6 +278,7 @@ contract EverestRouter {
     require(sweep(token_in_of(p1, z1), caller), "sweep failed")
     require(sweep(m1, caller), "sweep failed")
     require(sweep(m2, caller), "sweep failed")
+    self.gate = 0
     emit Routed(caller, recipient, 3, need_in, amount_out)
     return true
   }

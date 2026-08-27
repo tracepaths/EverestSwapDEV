@@ -22,6 +22,12 @@ contract EverestPositionManager {
   state {
     factory: address
     owner: address
+    // Opened by an entry point around the ownership-index helpers below and
+    // closed straight after. AML has no function visibility, so index_add/
+    // index_remove are externally callable; without this anyone could rewrite
+    // any wallet's position index. Never held across a call() to another
+    // contract. See EverestPool for the same pattern and why caller can't gate.
+    gate: int
 
     // ── non-fungible registry ──
     next_id: int
@@ -57,6 +63,7 @@ contract EverestPositionManager {
   constructor() {
     self.owner = caller
     self.next_id = 1
+    self.gate = 0
   }
 
   // An address that was never written reads back as "0" rather than empty, and an
@@ -130,6 +137,7 @@ contract EverestPositionManager {
   }
 
   fn index_add(to: address, token_id: int): bool {
+    require(self.gate > 0, "internal only")
     let n = self.nft_balance[to]
     self.owner_slot[to][n] = token_id
     self.token_slot[token_id] = n
@@ -138,6 +146,7 @@ contract EverestPositionManager {
   }
 
   fn index_remove(from: address, token_id: int): bool {
+    require(self.gate > 0, "internal only")
     let last = self.nft_balance[from] - 1
     let slot = self.token_slot[token_id]
     if slot != last {
@@ -179,8 +188,10 @@ contract EverestPositionManager {
     require(o == from, "from is not the holder")
     require(is_authorized(caller, token_id), "not authorized")
     self.nft_approved[token_id] = ""
+    self.gate = 1
     require(index_remove(from, token_id), "index update failed")
     require(index_add(to, token_id), "index update failed")
+    self.gate = 0
     self.nft_owner[token_id] = to
     emit Transfer(from, to, token_id)
     return true
@@ -197,6 +208,13 @@ contract EverestPositionManager {
   // Moves this token's share of the range's earnings into its own owed balance
   // and re-snapshots it. Must run before any change to the token's liquidity,
   // since earnings accrue against the liquidity that was in place.
+  //
+  // Deliberately ungated even though it is externally callable: it only ever
+  // credits a token's own earned fees to that token's own owed balance, which
+  // only the token's holder can collect, and it is idempotent (a second call
+  // finds no growth). A direct call can neither steal nor grief. Gating it
+  // would mean holding the gate open across its call() into the pool, which is
+  // exactly what the gate must never do.
   fn settle(token_id: int): bool {
     let p = self.pos_pool[token_id]
     let l = self.pos_lower[token_id]
@@ -266,7 +284,9 @@ contract EverestPositionManager {
     let id = self.next_id
     self.next_id = id + 1
     self.nft_owner[id] = recipient
+    self.gate = 1
     require(index_add(recipient, id), "index update failed")
+    self.gate = 0
     self.pos_pool[id] = p
     self.pos_lower[id] = lower
     self.pos_upper[id] = upper
@@ -359,7 +379,9 @@ contract EverestPositionManager {
     require(self.pos_liq[token_id] == 0, "position still holds liquidity")
     require(self.pos_owed0[token_id] == 0 && self.pos_owed1[token_id] == 0, "fees not collected")
     let holder = self.nft_owner[token_id]
+    self.gate = 1
     require(index_remove(holder, token_id), "index update failed")
+    self.gate = 0
     self.nft_owner[token_id] = ""
     self.nft_approved[token_id] = ""
     self.pos_pool[token_id] = ""

@@ -42,7 +42,15 @@ contract EverestPool {
     sqrt_price_x96: int
     cur_tick: int
     liq: int                 // liquidity active at the current price
+    liq_total: int           // total outstanding position liquidity, mint - burn;
+                             // unlike `liq` this counts positions out of range too
     started: bool
+    // Set to 1 by a public entry point around a run of internal helpers and
+    // cleared straight after — never held across a call() to another contract.
+    // AML has no function visibility, so every helper is externally callable;
+    // this flag is how a helper tells a legitimate internal call from a direct
+    // one. `caller` is unchanged across an internal jump, so it cannot.
+    gate: int
 
     // ── fee accounting ──
     fee_proto_0: int         // protocol takes 1/n of the swap fee; 0 = off
@@ -99,6 +107,8 @@ contract EverestPool {
     self.configured = false
     self.started = false
     self.liq = 0
+    self.liq_total = 0
+    self.gate = 0
     self.fg0 = 0
     self.fg1 = 0
     self.fee_proto_0 = 0
@@ -151,9 +161,11 @@ contract EverestPool {
     return true
   }
 
-  // Sets the starting price. Callable once, by anyone: the factory does this in
-  // the same transaction as create_pool so no third party can front-run it.
+  // Sets the starting price. Callable once, and only by the account that
+  // deployed the pool — the factory, which does this in the same transaction as
+  // create_pool so no third party can front-run or hijack the opening price.
   fn initialize(sqrt_price: int): bool {
+    require(caller == self.deployer, "not deployer")
     require(self.configured, "not configured")
     require(!self.started, "already initialized")
     require(sqrt_price >= min_sqrt_ratio(), "price too low")
@@ -229,6 +241,7 @@ contract EverestPool {
   // between referenced and unreferenced, which is when the caller must flip its
   // bitmap bit. `upper` selects the sign of the net delta.
   fn tick_apply(t: int, delta: int, upper: bool): bool {
+    require(self.gate > 0, "internal only")
     let gross_before = self.t_gross[t]
     let gross_after = gross_before + delta
     require(gross_after >= 0, "tick liquidity underflow")
@@ -271,6 +284,7 @@ contract EverestPool {
   // after both range ticks have been seeded, since it reads their outside
   // accumulators.
   fn pos_apply(owner: address, lower: int, upper: int, delta: int): bool {
+    require(self.gate > 0, "internal only")
     let liq_before = self.p_liq[owner][lower][upper]
     let liq_after = liq_before + delta
     require(liq_after >= 0, "insufficient position liquidity")
@@ -292,6 +306,9 @@ contract EverestPool {
     self.p_fg0[owner][lower][upper] = in0
     self.p_fg1[owner][lower][upper] = in1
     self.p_liq[owner][lower][upper] = liq_after
+    // The one write site for position liquidity, so the one place the pool's
+    // total outstanding liquidity moves. `delta` is signed: +mint, -burn, 0 poke.
+    self.liq_total = self.liq_total + delta
     return true
   }
 
@@ -351,6 +368,7 @@ contract EverestPool {
     require(a0 <= amount0_max, "token0 amount above maximum")
     require(a1 <= amount1_max, "token1 amount above maximum")
 
+    self.gate = 1
     if tick_apply(lower, amount, false) {
       require(flip_tick(lower, self.spacing), "flip lower failed")
     }
@@ -358,6 +376,7 @@ contract EverestPool {
       require(flip_tick(upper, self.spacing), "flip upper failed")
     }
     require(pos_apply(recipient, lower, upper, amount), "position update failed")
+    self.gate = 0
     if self.cur_tick >= lower && self.cur_tick < upper {
       self.liq = self.liq + amount
     }
@@ -389,6 +408,7 @@ contract EverestPool {
     require(out0 >= amount0_min, "token0 amount below minimum")
     require(out1 >= amount1_min, "token1 amount below minimum")
 
+    self.gate = 1
     if tick_apply(lower, 0 - amount, false) {
       require(flip_tick(lower, self.spacing), "flip lower failed")
     }
@@ -396,6 +416,7 @@ contract EverestPool {
       require(flip_tick(upper, self.spacing), "flip upper failed")
     }
     require(pos_apply(caller, lower, upper, 0 - amount), "position update failed")
+    self.gate = 0
     if self.cur_tick >= lower && self.cur_tick < upper {
       self.liq = self.liq - amount
     }
@@ -417,7 +438,9 @@ contract EverestPool {
     require(self.started, "not initialized")
     require(check_ticks(lower, upper), "invalid tick range")
     require(self.p_liq[caller][lower][upper] > 0, "no position")
+    self.gate = 1
     require(pos_apply(caller, lower, upper, 0), "position update failed")
+    self.gate = 0
     return true
   }
 
@@ -448,6 +471,7 @@ contract EverestPool {
   // this chain, and every window below is therefore an epoch count.
 
   fn obs_write(t: int, l: int): bool {
+    require(self.gate > 0, "internal only")
     let idx = self.o_index
     let last_ts = self.o_ts[idx]
     if last_ts == epoch {
@@ -547,6 +571,7 @@ contract EverestPool {
   // the signed liquidity delta to apply. Both global fee growths are passed in
   // because the one being accumulated is still a local at this point.
   fn cross_tick(t: int, zero_for_one: bool, g0: int, g1: int): int {
+    require(self.gate > 0, "internal only")
     self.t_fg0_out[t] = g0 - self.t_fg0_out[t]
     self.t_fg1_out[t] = g1 - self.t_fg1_out[t]
     self.t_cum_out[t] = self.o_tcum[self.o_index] - self.t_cum_out[t]
@@ -580,6 +605,7 @@ contract EverestPool {
     }
 
     // The oracle entry must describe the state before this swap moves it.
+    self.gate = 1
     require(obs_write(tick_cur, self.liq), "observation write failed")
 
     let exact_in = amount > 0
@@ -684,6 +710,7 @@ contract EverestPool {
       }
     }
 
+    self.gate = 0
     if zero_for_one {
       require(call(self.token0, "pull", [caller, self_addr, paid]), "input payment failed")
       require(call(self.token1, "transfer", [recipient, received]), "output payout failed")
@@ -874,6 +901,7 @@ contract EverestPool {
   // ─────────────────────────────────────────────────────────────────────
 
   fn accrue_fee(is_token0: bool, paid: int): bool {
+    require(self.gate > 0, "internal only")
     let den = self.fee_proto_1
     if is_token0 {
       den = self.fee_proto_0
@@ -927,12 +955,16 @@ contract EverestPool {
 
     let paid0 = after0 - before0
     let paid1 = after1 - before1
+    // Open the gate only now, after the borrower callback has returned, so the
+    // callback itself can never re-enter a gated helper.
+    self.gate = 1
     if paid0 > 0 {
       require(accrue_fee(true, paid0), "fee accrual failed")
     }
     if paid1 > 0 {
       require(accrue_fee(false, paid1), "fee accrual failed")
     }
+    self.gate = 0
     emit Flash(caller, recipient, amount0, amount1, paid0, paid1)
     return true
   }
@@ -988,6 +1020,11 @@ contract EverestPool {
   view fn get_sqrt_price(): int { return self.sqrt_price_x96 }
   view fn get_tick(): int { return self.cur_tick }
   view fn get_liquidity(): int { return self.liq }
+  // Total liquidity ever minted and not yet burned, positions in or out of
+  // range alike. The factory reads this to decide whether a pool is empty
+  // enough to delist; `get_liquidity` would wrongly read 0 for a pool whose
+  // positions are all out of range.
+  view fn total_liquidity(): int { return self.liq_total }
 
 
   view fn tick_liquidity_gross(t: int): int { return self.t_gross[t] }
@@ -1040,8 +1077,9 @@ contract EverestPool {
     let d = concat(concat(to_string(self.liq), "|"), concat(to_string(self.fg0), "|"))
     let e = concat(concat(to_string(self.fg1), "|"), concat(to_string(self.fee_proto_0), "|"))
     let f = concat(concat(to_string(self.fee_proto_1), "|"), concat(to_string(self.proto_owed_0), "|"))
-    let g = concat(concat(to_string(self.proto_owed_1), "|"), to_string(self.started))
-    return concat(concat(concat(a, b), concat(c, d)), concat(e, concat(f, g)))
+    let g = concat(concat(to_string(self.proto_owed_1), "|"), concat(to_string(self.started), "|"))
+    let h = to_string(self.liq_total)
+    return concat(concat(concat(a, b), concat(c, d)), concat(concat(e, f), concat(g, h)))
   }
 
   // The oracle ring buffer: where the cursor is, how far it currently extends,
