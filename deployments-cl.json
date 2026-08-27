@@ -61,7 +61,8 @@
   "positionManager": "octE6x8iLu5YGbpT8BCjn6XPPNtfgz4DbfnqKXMUjbXKsBP",
   "router": "octGeJ9B2w6zEDm7z7Zy7AHVgjXpNNNspkyTZwgmtaQP6nx",
   "pools": {
-    "3000": "octFDcTS4Hiux9WjbjxKaKQGvRLgfhA6sZDwKN3hCQxXJp2"
+    "3000": "octFDcTS4Hiux9WjbjxKaKQGvRLgfhA6sZDwKN3hCQxXJp2",
+    "10000": "oct8qG1qqGyzVsfGGgDEggNbjEE8sFJ6mSgW3xAk97xo42f"
   },
   "routePools": {
     "AB": "octFDcTS4Hiux9WjbjxKaKQGvRLgfhA6sZDwKN3hCQxXJp2",
